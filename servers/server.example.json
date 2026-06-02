@@ -1,0 +1,18 @@
+{
+  "type": "vless",
+  "tag": "myserver",
+  "server": "YOUR_SERVER_IP",
+  "server_port": 443,
+  "uuid": "YOUR_UUID",
+  "flow": "xtls-rprx-vision",
+  "tls": {
+    "enabled": true,
+    "server_name": "www.microsoft.com",
+    "utls": { "enabled": true, "fingerprint": "chrome" },
+    "reality": {
+      "enabled": true,
+      "public_key": "YOUR_REALITY_PUBLIC_KEY",
+      "short_id": "YOUR_SHORT_ID"
+    }
+  }
+}

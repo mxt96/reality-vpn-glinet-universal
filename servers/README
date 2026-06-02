@@ -1,0 +1,14 @@
+servers/ — YOUR servers live here. The repo ships this directory EMPTY (no creds).
+
+With 0 server files, rebuild.sh produces a valid DIRECT-only sing-box config:
+the router keeps normal internet and the VPN is simply "off".
+
+Add a server the easy way (parses a share-link for you):
+    sh ../add-server.sh 'vless://UUID@HOST:PORT?security=reality&pbk=PUBKEY&sid=SHORTID&sni=SNI&fp=chrome&flow=xtls-rprx-vision#myserver'
+    sh ../add-server.sh 'hysteria2://PASSWORD@HOST:PORT?sni=SNI#myserver'
+
+Or hand-write servers/<tag>.json as a single sing-box outbound object
+(see server.example.json for the exact shape — replace every placeholder).
+
+Each *.json here MUST be one outbound object whose "tag" equals the filename
+without .json. Then run ../rebuild.sh (add-server.sh does this automatically).

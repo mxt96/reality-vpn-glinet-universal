@@ -1,0 +1,12 @@
+{
+    "index": 15,
+    "view": "reality",
+    "title": "Reality",
+    "level": 2,
+    "parent": "vpn",
+    "parent_icon": "vpn",
+    "parent_index": 40,
+    "show_mode": [
+        "router"
+    ]
+}

@@ -1,0 +1,85 @@
+#!/bin/sh
+# VPN-Beryl local control panel API (session auth, password-only, brute-force).
+# Auth: validates against /etc/shadow root  == GL.iNet admin pass (rpcd $p$root). Unified.
+SESSDIR=/tmp/lk-sess; BFDIR=/tmp/lk-bf
+mkdir -p "$SESSDIR" "$BFDIR" 2>/dev/null
+MAXFAIL=5; LOCKSEC=60; SESSTTL=86400
+API=http://127.0.0.1:9090; PU=/etc/sing-box/postup.sh
+
+emit(){ printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n'; [ -n "$1" ] && printf 'Set-Cookie: sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400\r\n' "$1"; printf '\r\n'; }
+SID=$(printf '%s' "$HTTP_COOKIE" | sed -n 's/.*sid=\([A-Za-z0-9]\{8,\}\).*/\1/p')
+valid(){ [ -n "$SID" ] && [ -f "$SESSDIR/$SID" ] && [ "$(date +%s)" -lt "$(cat "$SESSDIR/$SID" 2>/dev/null || echo 0)" ]; }
+check_pw(){ S=$(grep '^root:' /etc/shadow | cut -d: -f2); A=$(printf '%s' "$S" | cut -d'$' -f2); SA=$(printf '%s' "$S" | cut -d'$' -f3); case "$A" in 1) F=-1;; 5) F=-5;; 6) F=-6;; apr1) F=-apr1;; *) F=-5;; esac; [ -n "$SA" ] && [ "$(openssl passwd $F -salt "$SA" "$1" 2>/dev/null)" = "$S" ]; }
+now_of(){ curl -s --max-time 3 "$API/proxies/$1" 2>/dev/null | sed -n 's/.*"now": *"\([A-Za-z0-9._-]*\)".*/\1/p'; }
+ks_on(){ iptables -C FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null || { iptables -I FORWARD -i br-lan ! -o singtun0 -j DROP; iptables -I FORWARD -i br-lan -o br-lan -j ACCEPT; }; }
+ks_off(){ iptables -D FORWARD -i br-lan -o br-lan -j ACCEPT 2>/dev/null; iptables -D FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null; }
+
+ACT=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*action=\([a-z_]*\).*/\1/p')
+IP=$(printf '%s' "${REMOTE_ADDR:-x}" | tr -c 'A-Za-z0-9.' '_'); BF="$BFDIR/$IP"
+N=$(date +%s)
+
+if [ "$ACT" = "login" ]; then
+  if [ -f "$BF" ]; then read F L < "$BF"; else F=0; L=0; fi
+  if [ "$N" -lt "${L:-0}" ]; then emit; echo "{\"ok\":false,\"locked\":true,\"wait\":$((L-N))}"; exit 0; fi
+  PW=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
+  if [ -n "$PW" ] && check_pw "$PW"; then
+    rm -f "$BF"; T=$(openssl rand -hex 16); echo "$((N+SESSTTL))" > "$SESSDIR/$T"
+    emit "$T"; echo '{"ok":true}'
+  else
+    F=$((F+1)); NL=0; if [ "$F" -ge "$MAXFAIL" ]; then NL=$((N+LOCKSEC)); F=0; fi
+    echo "$F $NL" > "$BF"; emit
+    if [ "$NL" -gt 0 ]; then echo "{\"ok\":false,\"locked\":true,\"wait\":$LOCKSEC}"; else echo '{"ok":false,"locked":false}'; fi
+  fi
+  exit 0
+fi
+
+if ! valid; then emit; echo '{"auth":false}'; exit 0; fi
+
+case "$ACT" in
+  logout) rm -f "$SESSDIR/$SID"; emit; echo '{"ok":true}'; exit 0;;
+  vpn_on) /etc/init.d/sing-box start >/dev/null 2>&1; sleep 1; [ -f "$PU" ] && sh "$PU" >/dev/null 2>&1; (/etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
+  speedtest)
+    DB=$(curl -4 -s --max-time 12 -o /dev/null -w '%{speed_download}' 'https://speed.cloudflare.com/__down?bytes=30000000' 2>/dev/null)
+    UB=$(head -c 8000000 /dev/zero 2>/dev/null | curl -4 -s --max-time 12 -o /dev/null -w '%{speed_upload}' --data-binary @- 'https://speed.cloudflare.com/__up' 2>/dev/null)
+    DM=$(awk "BEGIN{printf \"%.1f\", ${DB:-0}*8/1000000}")
+    UM=$(awk "BEGIN{printf \"%.1f\", ${UB:-0}*8/1000000}")
+    emit; echo "{\"down\":\"$DM\",\"up\":\"$UM\"}"; exit 0;;
+  vpn_off) ks_off; /etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; ip rule del pref 500 >/dev/null 2>&1; (sleep 3; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
+  ks_on) ks_on;;
+  ks_off) ks_off;;
+  proto) P=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p'); case "$P" in auto|hy2-out|reality-out|srv-*) curl -s --max-time 4 -X PUT "$API/proxies/select" -d "{\"name\":\"$P\"}" >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;; esac;;
+  setpass) NP=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
+    if [ -n "$NP" ] && [ "${#NP}" -ge 6 ]; then printf 'root:%s\n' "$NP" | chpasswd >/dev/null 2>&1; emit; echo '{"ok":true,"msg":"Password changed"}'; else emit; echo '{"ok":false,"msg":"At least 6 characters"}'; fi
+    exit 0;;
+  ip) /etc/sing-box/geo-refresh.sh 2>/dev/null
+      G=$(cat /tmp/lk-geo 2>/dev/null)
+      EG=$(printf '%s' "$G"|cut -d'|' -f2); CO=$(printf '%s' "$G"|cut -d'|' -f3); CI=$(printf '%s' "$G"|cut -d'|' -f4); PG=$(printf '%s' "$G"|cut -d'|' -f5)
+      emit; echo "{\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\"}"; exit 0;;
+  addserver)
+      NM=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]name=\([A-Za-z0-9._-]*\).*/\1/p')
+      LINK=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
+      TAG="srv-$(date +%s)"; [ -n "$NM" ] && TAG="srv-$(printf '%s' "$NM" | tr -c 'A-Za-z0-9._-' '_')"
+      OUT=$(/etc/sing-box/parse-link.sh "$LINK" "$TAG" 2>/dev/null)
+      if [ -z "$OUT" ]; then emit; echo '{"ok":false,"msg":"Unrecognized link (supports vless reality / hysteria2)"}'; exit 0; fi
+      printf '%s' "$OUT" > "/etc/sing-box/servers/$TAG.json"
+      R=$(/etc/sing-box/rebuild.sh 2>/dev/null | head -1)
+      if [ "$R" = "OK" ]; then emit; echo "{\"ok\":true,\"tag\":\"$TAG\"}"; else rm -f "/etc/sing-box/servers/$TAG.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; emit; echo '{"ok":false,"msg":"Server config rejected"}'; fi
+      exit 0;;
+  listservers)
+      L=""; for f in /etc/sing-box/servers/*.json; do [ -f "$f" ] || continue; t=$(basename "$f" .json); ty=$(sed -n 's/.*"type": *"\([a-z0-9]*\)".*/\1/p' "$f"|head -1); sv=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "$f"|head -1); L="$L,{\"tag\":\"$t\",\"type\":\"$ty\",\"server\":\"$sv\"}"; done
+      emit; echo "{\"servers\":[${L#,}]}"; exit 0;;
+  delserver)
+      DP=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\(srv-[A-Za-z0-9._-]*\).*/\1/p')
+      [ -n "$DP" ] && [ -f "/etc/sing-box/servers/$DP.json" ] && { rm -f "/etc/sing-box/servers/$DP.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; }
+      emit; echo '{"ok":true}'; exit 0;;
+  status) :;;
+esac
+VPN=$(pidof sing-box >/dev/null 2>&1 && echo true || echo false)
+KS=$(iptables -C FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null && echo true || echo false)
+MODE=$(now_of select); ACTIVE="$MODE"; [ "$MODE" = "auto" ] && ACTIVE=$(now_of auto)
+G=$(cat /tmp/lk-geo 2>/dev/null); EG=$(printf '%s' "$G"|cut -d'|' -f2); CO=$(printf '%s' "$G"|cut -d'|' -f3); CI=$(printf '%s' "$G"|cut -d'|' -f4); PG=$(printf '%s' "$G"|cut -d'|' -f5)
+[ -z "$G" ] && (/etc/sing-box/geo-refresh.sh &) 2>/dev/null
+SRV="—"
+[ -n "$ACTIVE" ] && [ "$ACTIVE" != "direct" ] && [ -f "/etc/sing-box/servers/$ACTIVE.json" ] && SRV=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "/etc/sing-box/servers/$ACTIVE.json" | head -1)
+[ -z "$SRV" ] && SRV="—"
+emit; echo "{\"auth\":true,\"vpn\":$VPN,\"killswitch\":$KS,\"mode\":\"$MODE\",\"active\":\"$ACTIVE\",\"server\":\"$SRV\",\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\"}"

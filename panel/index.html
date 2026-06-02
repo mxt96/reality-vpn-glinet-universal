@@ -1,0 +1,2059 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>VPN</title>
+<style>
+  /* ── Reset & Base ────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:          #000000;
+    --bg2:         #1C1C1E;
+    --bg3:         #2C2C2E;
+    --bg4:         #3A3A3C;
+    --sep:         rgba(255,255,255,0.10);
+    --sep2:        rgba(255,255,255,0.06);
+    --txt:         #FFFFFF;
+    --txt2:        rgba(255,255,255,0.55);
+    --txt3:        rgba(255,255,255,0.30);
+    --accent:      #5E5CE6;
+    --accent-glow: rgba(94,92,230,0.35);
+    --green:       #30D158;
+    --green-glow:  rgba(48,209,88,0.30);
+    --red:         #FF453A;
+    --red-glow:    rgba(255,69,58,0.25);
+    --orange:      #FF9F0A;
+    --card-r:      14px;
+    --row-h:       52px;
+    --font:        -apple-system, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  }
+
+  html { height: 100%; background: var(--bg); }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--txt);
+    min-height: 100%;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+
+  /* ── Screens ─────────────────────────────────────── */
+  .screen {
+    display: none;
+    min-height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom, 20px);
+  }
+  .screen.active { display: flex; flex-direction: column; }
+
+  /* ── Login Screen ────────────────────────────────── */
+  #screen-login {
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: 40px 28px;
+    padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 40px);
+  }
+
+  .login-logo {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+    background: linear-gradient(145deg, #3A3A3C, #2C2C2E);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.08) inset;
+  }
+
+  .login-logo svg {
+    width: 38px;
+    height: 38px;
+  }
+
+  .login-title {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--txt);
+    margin-bottom: 6px;
+    text-align: center;
+  }
+
+  .login-sub {
+    font-size: 15px;
+    color: var(--txt2);
+    margin-bottom: 36px;
+    text-align: center;
+    font-weight: 400;
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--bg2);
+    border-radius: var(--card-r);
+    overflow: hidden;
+    margin-bottom: 14px;
+    border: 0.5px solid var(--sep);
+  }
+
+  .login-input {
+    width: 100%;
+    height: 52px;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0 18px;
+    font-size: 17px;
+    font-family: var(--font);
+    color: var(--txt);
+    caret-color: var(--accent);
+  }
+
+  .login-input::placeholder { color: var(--txt3); }
+
+  .btn-primary {
+    width: 100%;
+    max-width: 360px;
+    height: 52px;
+    border-radius: var(--card-r);
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 17px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.12s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    -webkit-appearance: none;
+    letter-spacing: -0.1px;
+  }
+
+  .btn-primary:active { opacity: 0.75; transform: scale(0.98); }
+  .btn-primary:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
+
+  .login-error {
+    width: 100%;
+    max-width: 360px;
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--red);
+    text-align: center;
+    min-height: 20px;
+    font-weight: 500;
+    transition: opacity 0.2s;
+    line-height: 1.4;
+  }
+
+  /* ── Main Screen ─────────────────────────────────── */
+  #screen-main {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  }
+
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 20px 4px;
+  }
+
+  .nav-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--txt);
+    letter-spacing: -0.2px;
+  }
+
+  .btn-logout {
+    font-size: 15px;
+    color: var(--txt2);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font);
+    padding: 6px 0;
+    transition: color 0.15s;
+    font-weight: 400;
+  }
+  .btn-logout:active { color: var(--txt3); }
+
+  .scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 16px 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ── Hero Card ───────────────────────────────────── */
+  .hero-card {
+    background: var(--bg2);
+    border-radius: 18px;
+    border: 0.5px solid var(--sep);
+    padding: 24px 22px 22px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.4s;
+  }
+
+  .hero-card.vpn-on {
+    border-color: rgba(48,209,88,0.25);
+  }
+
+  /* breathing glow */
+  .hero-glow {
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--green-glow) 0%, transparent 70%);
+    opacity: 0;
+    transition: opacity 0.6s;
+    pointer-events: none;
+  }
+  .hero-card.vpn-on .hero-glow {
+    opacity: 1;
+    animation: breath 3.2s ease-in-out infinite;
+  }
+
+  @keyframes breath {
+    0%,100% { transform: translateX(-50%) scale(1);   opacity: 0.7; }
+    50%      { transform: translateX(-50%) scale(1.18); opacity: 1; }
+  }
+
+  .hero-status-label {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--txt3);
+    margin-bottom: 14px;
+    position: relative;
+  }
+
+  .hero-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    position: relative;
+    margin-bottom: 18px;
+  }
+
+  .hero-state-text {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.8px;
+    transition: color 0.35s;
+    color: var(--txt2);
+    min-width: 60px;
+  }
+  .vpn-on .hero-state-text { color: var(--green); }
+
+  /* ── iOS Toggle ──────────────────────────────────── */
+  .toggle-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .toggle-input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-track {
+    width: 58px;
+    height: 34px;
+    border-radius: 17px;
+    background: var(--bg4);
+    transition: background 0.3s cubic-bezier(0.4,0,0.2,1);
+    position: relative;
+    box-shadow: 0 0 0 0.5px rgba(255,255,255,0.08) inset;
+  }
+
+  .toggle-input:checked + .toggle-track {
+    background: var(--green);
+    box-shadow: 0 0 0 0.5px rgba(0,0,0,0.1) inset;
+  }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 28px;
+    height: 28px;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+    transition: transform 0.3s cubic-bezier(0.34,1.2,0.64,1);
+  }
+
+  .toggle-input:checked ~ .toggle-thumb {
+    transform: translateX(24px);
+  }
+
+  /* Large toggle variant for hero */
+  .toggle-track.large {
+    width: 68px;
+    height: 40px;
+    border-radius: 20px;
+  }
+  .toggle-track.large .toggle-thumb {
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+  }
+  .toggle-input:checked + .toggle-track.large .toggle-thumb,
+  .toggle-track.large.checked .toggle-thumb {
+    transform: translateX(28px);
+  }
+
+  /* self-contained large toggle */
+  .ios-toggle {
+    position: relative;
+    width: 68px;
+    height: 40px;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .ios-toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .ios-toggle-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    background: var(--bg4);
+    transition: background 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 0 0 0 0.5px rgba(255,255,255,0.08) inset;
+  }
+
+  .ios-toggle.on .ios-toggle-track { background: var(--green); }
+
+  .ios-toggle-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5), 0 1px 3px rgba(0,0,0,0.25);
+    transition: transform 0.32s cubic-bezier(0.34,1.22,0.64,1);
+  }
+
+  .ios-toggle.on .ios-toggle-thumb { transform: translateX(28px); }
+  .ios-toggle.loading .ios-toggle-track { opacity: 0.5; }
+
+  .small-toggle {
+    position: relative;
+    width: 50px;
+    height: 30px;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  .small-toggle-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 15px;
+    background: var(--bg4);
+    transition: background 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 0 0 0 0.5px rgba(255,255,255,0.08) inset;
+  }
+
+  .small-toggle.on .small-toggle-track { background: var(--green); }
+  .small-toggle.loading .small-toggle-track { opacity: 0.5; }
+
+  .small-toggle-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    transition: transform 0.3s cubic-bezier(0.34,1.22,0.64,1);
+  }
+
+  .small-toggle.on .small-toggle-thumb { transform: translateX(20px); }
+
+  /* ── Hero protocol badge ─────────────────────────── */
+  .hero-protocol {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 13px;
+    color: var(--txt2);
+    font-weight: 500;
+    transition: all 0.3s;
+  }
+
+  .hero-protocol.active-badge {
+    background: rgba(94,92,230,0.18);
+    color: var(--accent);
+  }
+
+  .proto-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--txt3);
+    transition: background 0.3s;
+    flex-shrink: 0;
+  }
+  .active-badge .proto-dot { background: var(--accent); }
+
+  /* ── Section ─────────────────────────────────────── */
+  .section {
+    margin-bottom: 10px;
+  }
+
+  .section-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--txt2);
+    letter-spacing: 0.2px;
+    padding: 0 4px 6px;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+  }
+
+  .card {
+    background: var(--bg2);
+    border-radius: var(--card-r);
+    border: 0.5px solid var(--sep);
+    overflow: hidden;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    height: var(--row-h);
+    gap: 12px;
+    position: relative;
+    cursor: default;
+    transition: background 0.15s;
+  }
+
+  .row + .row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 16px;
+    right: 0;
+    height: 0.5px;
+    background: var(--sep);
+  }
+
+  .row-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .row-icon svg { width: 16px; height: 16px; }
+
+  .row-icon.indigo { background: var(--accent); }
+  .row-icon.teal   { background: #30C8D0; }
+  .row-icon.orange { background: var(--orange); }
+  .row-icon.gray   { background: var(--bg4); }
+  .row-icon.green  { background: var(--green); }
+
+  .row-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    gap: 1px;
+  }
+
+  .row-label {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--txt);
+    letter-spacing: -0.1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .row-detail {
+    font-size: 12px;
+    color: var(--txt2);
+    font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .row-value {
+    font-size: 15px;
+    color: var(--txt2);
+    font-weight: 400;
+    text-align: right;
+    flex-shrink: 0;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .row-chevron {
+    color: var(--txt3);
+    flex-shrink: 0;
+    margin-left: -4px;
+  }
+
+  .row-tappable {
+    cursor: pointer;
+  }
+  .row-tappable:active { background: rgba(255,255,255,0.06); }
+
+  /* ── Segmented Control ───────────────────────────── */
+  .seg-section {
+    margin-bottom: 10px;
+  }
+
+  .seg-control {
+    background: var(--bg2);
+    border-radius: var(--card-r);
+    border: 0.5px solid var(--sep);
+    padding: 4px;
+    display: flex;
+    gap: 2px;
+    position: relative;
+  }
+
+  .seg-option {
+    flex: 1;
+    height: 36px;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+    color: var(--txt2);
+    font-size: 14px;
+    font-weight: 500;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: all 0.22s cubic-bezier(0.4,0,0.2,1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 4px;
+    white-space: nowrap;
+    position: relative;
+    z-index: 1;
+  }
+
+  .seg-option.active {
+    background: var(--bg4);
+    color: var(--txt);
+    font-weight: 600;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.35), 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+
+  .seg-option:active:not(.active) { background: rgba(255,255,255,0.05); }
+
+  /* ── Spinner (shared) ───────────────────────────── */
+  .ip-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ── Geo strip (always-visible header) ──────────── */
+  .geo-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 20px 10px;
+    min-height: 36px;
+  }
+
+  .geo-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--txt3);
+    flex-shrink: 0;
+    transition: background 0.4s;
+  }
+
+  .geo-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
+
+  .geo-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .geo-ip {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--txt);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .geo-location {
+    font-size: 11px;
+    color: var(--txt2);
+    font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+
+  .geo-ping {
+    font-size: 12px;
+    color: var(--txt3);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .geo-ping.fast   { color: var(--green); }
+  .geo-ping.medium { color: var(--orange); }
+  .geo-ping.slow   { color: var(--red); }
+
+  /* ── Speedtest row result ────────────────────────── */
+  .speed-result {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+
+  .speed-val {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--txt);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .speed-val .speed-arrow {
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .speed-val .speed-unit {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--txt2);
+  }
+
+  .speed-down .speed-arrow { color: #30C8D0; }
+  .speed-up   .speed-arrow { color: var(--accent); }
+
+  /* ── Change Password Modal ───────────────────────── */
+  .modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 100;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .modal-backdrop.open {
+    display: flex;
+    animation: fade-in 0.2s ease;
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  .modal-sheet {
+    width: 100%;
+    max-width: 480px;
+    background: var(--bg2);
+    border-radius: 20px 20px 0 0;
+    border: 0.5px solid var(--sep);
+    border-bottom: none;
+    padding: 16px 20px 28px;
+    animation: slide-up 0.32s cubic-bezier(0.34,1.1,0.64,1);
+  }
+
+  @keyframes slide-up {
+    from { transform: translateY(60px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  .modal-handle {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--bg4);
+    margin: 0 auto 18px;
+  }
+
+  .modal-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--txt);
+    text-align: center;
+    margin-bottom: 20px;
+    letter-spacing: -0.2px;
+  }
+
+  .modal-card {
+    background: var(--bg3);
+    border-radius: var(--card-r);
+    overflow: hidden;
+    border: 0.5px solid var(--sep);
+    margin-bottom: 12px;
+  }
+
+  .modal-input-row {
+    display: flex;
+    align-items: center;
+    height: 50px;
+    padding: 0 16px;
+    position: relative;
+  }
+
+  .modal-input-row + .modal-input-row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 16px;
+    right: 0;
+    height: 0.5px;
+    background: var(--sep);
+  }
+
+  .modal-input-label {
+    font-size: 15px;
+    color: var(--txt2);
+    width: 130px;
+    flex-shrink: 0;
+    font-weight: 400;
+  }
+
+  .modal-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 15px;
+    font-family: var(--font);
+    color: var(--txt);
+    caret-color: var(--accent);
+    text-align: right;
+  }
+
+  .modal-input::placeholder { color: var(--txt3); }
+
+  .modal-error {
+    font-size: 13px;
+    color: var(--red);
+    font-weight: 500;
+    text-align: center;
+    min-height: 18px;
+    margin-bottom: 12px;
+    line-height: 1.4;
+    padding: 0 4px;
+  }
+
+  .modal-success {
+    font-size: 14px;
+    color: var(--green);
+    font-weight: 500;
+    text-align: center;
+    min-height: 18px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .btn-modal-cancel {
+    flex: 1;
+    height: 48px;
+    border-radius: 12px;
+    border: none;
+    background: var(--bg3);
+    color: var(--txt2);
+    font-size: 16px;
+    font-weight: 500;
+    font-family: var(--font);
+    cursor: pointer;
+    border: 0.5px solid var(--sep);
+    transition: opacity 0.15s;
+  }
+  .btn-modal-cancel:active { opacity: 0.6; }
+
+  .btn-modal-save {
+    flex: 1;
+    height: 48px;
+    border-radius: 12px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.12s;
+  }
+  .btn-modal-save:active { opacity: 0.75; transform: scale(0.98); }
+  .btn-modal-save:disabled { opacity: 0.38; cursor: not-allowed; transform: none; }
+
+  /* ── Connection error banner ─────────────────────── */
+  .err-banner {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,69,58,0.12);
+    border: 0.5px solid rgba(255,69,58,0.3);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--red);
+    font-weight: 500;
+  }
+  .err-banner.show { display: flex; }
+
+  /* ── Loading spinner (initial) ───────────────────── */
+  .full-loader {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    flex-direction: column;
+    gap: 16px;
+    transition: opacity 0.3s;
+  }
+
+  .full-loader.hide {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .loader-ring {
+    width: 44px;
+    height: 44px;
+    border: 3px solid var(--bg3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .loader-text {
+    font-size: 14px;
+    color: var(--txt2);
+  }
+
+  /* ── Footer padding ──────────────────────────────── */
+  .scroll-footer {
+    height: 20px;
+  }
+
+  /* ── Misc utility ────────────────────────────────── */
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+  }
+
+  /* ── Ripple-like tap feedback on btn rows ────────── */
+  .row-btn {
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .row-btn:active { background: rgba(255,255,255,0.06); }
+
+  /* ── Show-password eye button ────────────────────── */
+  .pass-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+
+  .pass-wrap .login-input {
+    padding-right: 48px;
+  }
+
+  .pass-wrap .modal-input {
+    padding-right: 32px;
+  }
+
+  .eye-btn {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    color: var(--txt3);
+    transition: color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    flex-shrink: 0;
+  }
+
+  .eye-btn:active { color: var(--txt2); }
+  .eye-btn svg { width: 20px; height: 20px; }
+
+  /* ── Server list rows ────────────────────────────── */
+  .server-row-active .row-label { color: var(--accent); }
+
+  .row-check {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .row-trash {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--red);
+    padding: 0;
+    border-radius: 8px;
+    transition: background 0.12s;
+    -webkit-tap-highlight-color: transparent;
+    flex-shrink: 0;
+  }
+  .row-trash:active { background: rgba(255,69,58,0.12); }
+  .row-trash svg { width: 17px; height: 17px; }
+
+  /* add-server link row */
+  .row-add {
+    color: var(--accent);
+  }
+  .row-add .row-label { color: var(--accent); font-weight: 500; }
+
+  /* ── Add-server modal textarea ───────────────────── */
+  .modal-textarea-row {
+    padding: 12px 16px;
+    position: relative;
+  }
+
+  .modal-textarea-row + .modal-input-row::before,
+  .modal-input-row + .modal-textarea-row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 16px;
+    right: 0;
+    height: 0.5px;
+    background: var(--sep);
+  }
+
+  .modal-textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    font-family: var(--font);
+    color: var(--txt);
+    caret-color: var(--accent);
+    resize: none;
+    min-height: 72px;
+    line-height: 1.5;
+  }
+
+  .modal-textarea::placeholder { color: var(--txt3); }
+</style>
+</head>
+<body>
+
+<!-- ── Full-screen Loader ───────────────────────────── -->
+<div class="full-loader" id="loader">
+  <div class="loader-ring"></div>
+  <div class="loader-text">Connecting…</div>
+</div>
+
+<!-- ── LOGIN SCREEN ─────────────────────────────────── -->
+<div id="screen-login" class="screen">
+  <div class="login-logo" aria-hidden="true">
+    <!-- Shield icon -->
+    <svg viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M19 3L5.5 9v9.5C5.5 26.2 11.4 33 19 35c7.6-2 13.5-8.8 13.5-16.5V9L19 3Z" fill="url(#sg)" stroke="rgba(255,255,255,0.15)" stroke-width="0.5"/>
+      <path d="M14 19l3.5 3.5L24 15" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <defs>
+        <linearGradient id="sg" x1="19" y1="3" x2="19" y2="35" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#7B79F5"/>
+          <stop offset="1" stop-color="#4340C4"/>
+        </linearGradient>
+      </defs>
+    </svg>
+  </div>
+  <div class="login-title">VPN Panel</div>
+  <div class="login-sub">Enter your password to log in</div>
+
+  <div class="login-card">
+    <div class="pass-wrap">
+      <input
+        id="login-pass"
+        class="login-input"
+        type="password"
+        placeholder="Password"
+        autocomplete="current-password"
+        enterkeyhint="go"
+        aria-label="Password"
+      >
+      <button type="button" class="eye-btn" data-target="login-pass" aria-label="Show password">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" class="eye-path"/>
+          <circle cx="12" cy="12" r="3" class="eye-path"/>
+          <line x1="3" y1="3" x2="21" y2="21" class="eye-slash" style="display:none"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <button id="login-btn" class="btn-primary" style="margin-bottom:0">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path d="M8 1a4 4 0 0 1 4 4v1H4V5a4 4 0 0 1 4-4ZM3 7h10a1 1 0 0 1 1 1v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a1 1 0 0 1 1-1Z" fill="white" opacity="0.9"/>
+    </svg>
+    Log in
+  </button>
+  <div id="login-error" class="login-error" aria-live="polite"></div>
+</div>
+
+<!-- ── MAIN SCREEN ──────────────────────────────────── -->
+<div id="screen-main" class="screen">
+
+  <!-- Nav -->
+  <div class="nav-bar">
+    <span class="nav-title">VPN</span>
+    <button id="logout-btn" class="btn-logout" aria-label="Log out">Log out</button>
+  </div>
+
+  <!-- Always-visible geo/IP strip -->
+  <div class="geo-strip" id="geo-strip" aria-live="polite" aria-label="Connection info">
+    <div class="geo-dot" id="geo-dot"></div>
+    <div class="geo-text">
+      <div class="geo-ip" id="geo-ip">—</div>
+      <div class="geo-location" id="geo-location"></div>
+    </div>
+    <div class="geo-ping" id="geo-ping"></div>
+  </div>
+
+  <div class="scroll-area">
+
+    <!-- Error banner -->
+    <div id="err-banner" class="err-banner" role="alert">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" flex-shrink="0">
+        <circle cx="8" cy="8" r="7" stroke="#FF453A" stroke-width="1.5"/>
+        <path d="M8 5v3.5M8 11v.5" stroke="#FF453A" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      No connection to the router
+    </div>
+
+    <!-- Hero card -->
+    <div class="hero-card" id="hero-card">
+      <div class="hero-glow"></div>
+      <div class="hero-status-label">STATUS</div>
+      <div class="hero-toggle-row">
+        <div class="hero-state-text" id="hero-text">OFF</div>
+        <div class="ios-toggle" id="vpn-toggle" role="switch" aria-label="VPN" tabindex="0">
+          <input type="checkbox" id="vpn-toggle-input" aria-hidden="true">
+          <div class="ios-toggle-track"></div>
+          <div class="ios-toggle-thumb"></div>
+        </div>
+      </div>
+      <div class="hero-protocol" id="hero-proto-badge">
+        <div class="proto-dot"></div>
+        <span id="hero-proto-text">—</span>
+      </div>
+    </div>
+
+    <!-- Protocol picker -->
+    <div class="seg-section section">
+      <div class="section-header">Protocol</div>
+      <div class="seg-control" id="seg-proto" role="group" aria-label="Protocol">
+        <button class="seg-option" data-mode="auto"        role="radio" aria-checked="false">Auto</button>
+        <button class="seg-option" data-mode="hy2-out"     role="radio" aria-checked="false">⚡ Hysteria2</button>
+        <button class="seg-option" data-mode="reality-out" role="radio" aria-checked="false">🔒 Reality</button>
+      </div>
+    </div>
+
+    <!-- Killswitch + Server -->
+    <div class="section">
+      <div class="section-header">Settings</div>
+      <div class="card">
+        <div class="row">
+          <div class="row-icon orange">
+            <!-- Fire/lock icon -->
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M8 1s-4 3-4 7a4 4 0 0 0 8 0c0-4-4-7-4-7Z" fill="white" opacity="0.9"/>
+              <path d="M8 9a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" fill="rgba(255,120,0,0.9)"/>
+            </svg>
+          </div>
+          <div class="row-content">
+            <div class="row-label">Kill Switch</div>
+            <div class="row-detail">Blocks internet if the tunnel drops</div>
+          </div>
+          <div class="small-toggle" id="ks-toggle" role="switch" aria-label="Kill Switch" tabindex="0">
+            <div class="small-toggle-track"></div>
+            <div class="small-toggle-thumb"></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-icon indigo">
+            <svg viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" opacity="0.9"/>
+              <path d="M8 5v3l2 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="row-content">
+            <div class="row-label">Server</div>
+          </div>
+          <div class="row-value" id="server-val">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Speedtest -->
+    <div class="section">
+      <div class="card">
+        <div class="row row-tappable row-btn" id="speedtest-row" tabindex="0" role="button" aria-label="Measure connection speed">
+          <div class="row-icon teal">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M2 11a6 6 0 1 1 12 0" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>
+              <path d="M8 11V7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M8 11l3-3" stroke="white" stroke-width="1.4" stroke-linecap="round" opacity="0.7"/>
+            </svg>
+          </div>
+          <div class="row-content">
+            <div class="row-label">Connection speed</div>
+            <div class="row-detail" id="speed-detail">Tap to measure</div>
+          </div>
+          <div class="speed-result" id="speed-result" style="display:none">
+            <div class="speed-val speed-down">
+              <span class="speed-arrow">↓</span>
+              <span id="speed-down-val">—</span>
+              <span class="speed-unit">Mbit/s</span>
+            </div>
+            <div class="speed-val speed-up">
+              <span class="speed-arrow">↑</span>
+              <span id="speed-up-val">—</span>
+              <span class="speed-unit">Mbit/s</span>
+            </div>
+          </div>
+          <span id="speed-chevron" class="row-chevron">
+            <svg width="8" height="13" viewBox="0 0 8 13" fill="none">
+              <path d="M1 1l6 5.5L1 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Servers -->
+    <div class="section" id="servers-section">
+      <div class="section-header">Servers</div>
+      <div class="card" id="servers-card">
+        <!-- empty-state hint shown when user has no servers (JS toggles) -->
+        <div class="row" id="servers-empty" style="display:none">
+          <div class="row-icon indigo">
+            <svg viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="3" width="12" height="4" rx="1.2" stroke="white" stroke-width="1.3" opacity="0.9"/>
+              <rect x="2" y="9" width="12" height="4" rx="1.2" stroke="white" stroke-width="1.3" opacity="0.9"/>
+              <circle cx="12.5" cy="5" r="1" fill="white" opacity="0.8"/>
+              <circle cx="12.5" cy="11" r="1" fill="white" opacity="0.8"/>
+            </svg>
+          </div>
+          <div class="row-content">
+            <div class="row-label">No servers</div>
+            <div class="row-detail">Add a server using the link below</div>
+          </div>
+        </div>
+        <!-- dynamic user servers injected here by JS -->
+        <div id="user-servers-list"></div>
+        <!-- Add server row -->
+        <div class="row row-tappable row-btn row-add" id="addserver-row" tabindex="0" role="button" aria-label="Add server">
+          <div class="row-icon" style="background:rgba(94,92,230,0.18);">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M8 3v10M3 8h10" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="row-content">
+            <div class="row-label">Add server</div>
+          </div>
+          <span class="row-chevron">
+            <svg width="8" height="13" viewBox="0 0 8 13" fill="none">
+              <path d="M1 1l6 5.5L1 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Password -->
+    <div class="section">
+      <div class="card">
+        <div class="row row-tappable row-btn" id="chpass-row" tabindex="0" role="button" aria-label="Change password">
+          <div class="row-icon gray">
+            <svg viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="white" stroke-width="1.4" opacity="0.85"/>
+              <path d="M5.5 7V5.5a2.5 2.5 0 0 1 5 0V7" stroke="white" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/>
+              <circle cx="8" cy="10.5" r="1" fill="white" opacity="0.85"/>
+            </svg>
+          </div>
+          <div class="row-content">
+            <div class="row-label">Change password</div>
+          </div>
+          <span class="row-chevron">
+            <svg width="8" height="13" viewBox="0 0 8 13" fill="none">
+              <path d="M1 1l6 5.5L1 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="scroll-footer"></div>
+  </div>
+</div>
+
+<!-- ── CHANGE PASSWORD MODAL ─────────────────────────── -->
+<div class="modal-backdrop" id="pass-modal" role="dialog" aria-modal="true" aria-label="Change password">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Change password</div>
+
+    <div class="modal-card">
+      <div class="modal-input-row">
+        <label class="modal-input-label" for="new-pass">New password</label>
+        <div class="pass-wrap" style="flex:1;height:100%;align-items:center;">
+          <input
+            id="new-pass"
+            class="modal-input"
+            type="password"
+            placeholder="min. 6 characters"
+            autocomplete="new-password"
+            enterkeyhint="next"
+          >
+          <button type="button" class="eye-btn" data-target="new-pass" aria-label="Show password" style="right:0;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" class="eye-path"/>
+              <circle cx="12" cy="12" r="3" class="eye-path"/>
+              <line x1="3" y1="3" x2="21" y2="21" class="eye-slash" style="display:none"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="modal-input-row">
+        <label class="modal-input-label" for="confirm-pass">Repeat</label>
+        <div class="pass-wrap" style="flex:1;height:100%;align-items:center;">
+          <input
+            id="confirm-pass"
+            class="modal-input"
+            type="password"
+            placeholder="repeat password"
+            autocomplete="new-password"
+            enterkeyhint="done"
+          >
+          <button type="button" class="eye-btn" data-target="confirm-pass" aria-label="Show password" style="right:0;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" class="eye-path"/>
+              <circle cx="12" cy="12" r="3" class="eye-path"/>
+              <line x1="3" y1="3" x2="21" y2="21" class="eye-slash" style="display:none"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-error" id="modal-error" aria-live="polite"></div>
+    <div class="modal-success" id="modal-success" style="display:none" aria-live="polite">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="7" fill="var(--green)" opacity="0.2"/>
+        <path d="M5 8.5l2.5 2.5L11 6" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Password changed
+    </div>
+
+    <div class="modal-actions">
+      <button id="modal-cancel" class="btn-modal-cancel">Cancel</button>
+      <button id="modal-save" class="btn-modal-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ADD SERVER MODAL ──────────────────────────────── -->
+<div class="modal-backdrop" id="addserver-modal" role="dialog" aria-modal="true" aria-label="Add server">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Add server</div>
+
+    <div class="modal-card">
+      <div class="modal-input-row">
+        <label class="modal-input-label" for="as-name">Name</label>
+        <input
+          id="as-name"
+          class="modal-input"
+          type="text"
+          placeholder="Finland"
+          autocomplete="off"
+          enterkeyhint="next"
+          maxlength="32"
+        >
+      </div>
+      <div class="modal-textarea-row">
+        <textarea
+          id="as-link"
+          class="modal-textarea"
+          placeholder="vless://… or hysteria2://…"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          rows="3"
+        ></textarea>
+      </div>
+    </div>
+
+    <div class="modal-error" id="as-error" aria-live="polite"></div>
+
+    <div class="modal-actions">
+      <button id="as-cancel" class="btn-modal-cancel">Cancel</button>
+      <button id="as-save" class="btn-modal-save">Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── State ─────────────────────────────────────── */
+  let state = {
+    auth: false,
+    vpn: false,
+    killswitch: false,
+    mode: 'auto',
+    active: 'hy2-out',
+    server: '—',
+    egress: '',
+    country: '',
+    city: '',
+    ping: null,
+  };
+
+  let refreshTimer  = null;
+  let lockCountdown = null;
+
+  /* ── Helpers ───────────────────────────────────── */
+  function api(action, opts = {}) {
+    const url = '/cgi-bin/api?action=' + action + (opts.query ? '&' + opts.query : '');
+    return fetch(url, {
+      method: opts.method || 'GET',
+      body: opts.body !== undefined ? opts.body : undefined,
+      credentials: 'same-origin',
+    }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  function protoLabel(mode, active) {
+    if (mode === 'auto') {
+      const activeLabel = active === 'hy2-out' ? 'Hysteria2 ⚡' : 'Reality 🔒';
+      return 'Auto · ' + activeLabel;
+    }
+    if (mode === 'hy2-out') return 'Hysteria2 ⚡';
+    if (mode === 'reality-out') return 'Reality 🔒';
+    return mode;
+  }
+
+  // Determine if current mode is a "built-in" (not a user server tag)
+  function isBuiltinMode(mode) {
+    return mode === 'auto' || mode === 'hy2-out' || mode === 'reality-out';
+  }
+
+  function flagEmoji(country) {
+    if (!country) return '🌍';
+    // Map common country names to flag emojis via regional indicator letters
+    const map = {
+      'Lithuania': '🇱🇹', 'Finland': '🇫🇮', 'Germany': '🇩🇪',
+      'Netherlands': '🇳🇱', 'France': '🇫🇷', 'Sweden': '🇸🇪',
+      'Norway': '🇳🇴', 'Switzerland': '🇨🇭', 'Austria': '🇦🇹',
+      'Poland': '🇵🇱', 'Czech Republic': '🇨🇿', 'Slovakia': '🇸🇰',
+      'Hungary': '🇭🇺', 'Romania': '🇷🇴', 'Bulgaria': '🇧🇬',
+      'Ukraine': '🇺🇦', 'Russia': '🇷🇺', 'United States': '🇺🇸',
+      'United Kingdom': '🇬🇧', 'Canada': '🇨🇦', 'Japan': '🇯🇵',
+      'Singapore': '🇸🇬', 'Australia': '🇦🇺', 'Brazil': '🇧🇷',
+    };
+    return map[country] || '🌍';
+  }
+
+  /* ── DOM refs ──────────────────────────────────── */
+  const loader           = document.getElementById('loader');
+  const screenLogin      = document.getElementById('screen-login');
+  const screenMain       = document.getElementById('screen-main');
+  const loginPass        = document.getElementById('login-pass');
+  const loginBtn         = document.getElementById('login-btn');
+  const loginError       = document.getElementById('login-error');
+  const logoutBtn        = document.getElementById('logout-btn');
+  const errBanner        = document.getElementById('err-banner');
+  const geoDot           = document.getElementById('geo-dot');
+  const geoIp            = document.getElementById('geo-ip');
+  const geoLocation      = document.getElementById('geo-location');
+  const geoPing          = document.getElementById('geo-ping');
+  const heroCard         = document.getElementById('hero-card');
+  const heroText         = document.getElementById('hero-text');
+  const vpnToggle        = document.getElementById('vpn-toggle');
+  const heroBadge        = document.getElementById('hero-proto-badge');
+  const heroProtoText    = document.getElementById('hero-proto-text');
+  const segProto         = document.getElementById('seg-proto');
+  const ksToggle         = document.getElementById('ks-toggle');
+  const speedtestRow     = document.getElementById('speedtest-row');
+  const speedDetail      = document.getElementById('speed-detail');
+  const speedResult      = document.getElementById('speed-result');
+  const speedDownVal     = document.getElementById('speed-down-val');
+  const speedUpVal       = document.getElementById('speed-up-val');
+  const speedChevron     = document.getElementById('speed-chevron');
+  const serversEmpty     = document.getElementById('servers-empty');
+  const userServersList  = document.getElementById('user-servers-list');
+  const addserverRow     = document.getElementById('addserver-row');
+  const chpassRow        = document.getElementById('chpass-row');
+  const passModal        = document.getElementById('pass-modal');
+  const newPass          = document.getElementById('new-pass');
+  const confirmPass      = document.getElementById('confirm-pass');
+  const modalError       = document.getElementById('modal-error');
+  const modalSuccess     = document.getElementById('modal-success');
+  const modalCancel      = document.getElementById('modal-cancel');
+  const modalSave        = document.getElementById('modal-save');
+  const addserverModal   = document.getElementById('addserver-modal');
+  const asName           = document.getElementById('as-name');
+  const asLink           = document.getElementById('as-link');
+  const asError          = document.getElementById('as-error');
+  const asCancel         = document.getElementById('as-cancel');
+  const asSave           = document.getElementById('as-save');
+
+  /* ── Show/Hide screens ─────────────────────────── */
+  function showScreen(name) {
+    screenLogin.classList.remove('active');
+    screenMain.classList.remove('active');
+    if (name === 'login') screenLogin.classList.add('active');
+    if (name === 'main')  screenMain.classList.add('active');
+  }
+
+  function hideLoader() {
+    loader.classList.add('hide');
+    setTimeout(() => { loader.style.display = 'none'; }, 350);
+  }
+
+  /* ── Eye / show-password toggle ────────────────── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.eye-btn');
+    if (!btn) return;
+    const targetId = btn.dataset.target;
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    // Toggle SVG elements
+    btn.querySelectorAll('.eye-path').forEach(el => {
+      el.style.display = showing ? '' : 'none';
+    });
+    btn.querySelectorAll('.eye-slash').forEach(el => {
+      el.style.display = showing ? 'none' : '';
+    });
+    btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    btn.style.color = showing ? '' : 'var(--txt2)';
+  });
+
+  /* ── Apply state to UI (no flicker) ───────────── */
+  function applyState(s) {
+    const vpnOn = s.vpn;
+
+    // VPN toggle
+    if (vpnToggle.classList.contains('on') !== vpnOn) {
+      vpnOn ? vpnToggle.classList.add('on') : vpnToggle.classList.remove('on');
+      vpnToggle.setAttribute('aria-checked', String(vpnOn));
+    }
+    // Hero card
+    if (heroCard.classList.contains('vpn-on') !== vpnOn) {
+      vpnOn ? heroCard.classList.add('vpn-on') : heroCard.classList.remove('vpn-on');
+    }
+    // Hero text
+    const wantText = vpnOn ? 'ON' : 'OFF';
+    if (heroText.textContent !== wantText) heroText.textContent = wantText;
+    heroText.style.color = vpnOn ? 'var(--green)' : 'var(--txt2)';
+
+    // Protocol badge
+    const protoStr = protoLabel(s.mode, s.active);
+    if (heroProtoText.textContent !== protoStr) heroProtoText.textContent = protoStr;
+    vpnOn ? heroBadge.classList.add('active-badge') : heroBadge.classList.remove('active-badge');
+
+    // Segmented control
+    segProto.querySelectorAll('.seg-option').forEach(btn => {
+      const isActive = btn.dataset.mode === s.mode;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-checked', String(isActive));
+    });
+
+    // Kill switch
+    const ksOn = s.killswitch;
+    if (ksToggle.classList.contains('on') !== ksOn) {
+      ksOn ? ksToggle.classList.add('on') : ksToggle.classList.remove('on');
+      ksToggle.setAttribute('aria-checked', String(ksOn));
+    }
+
+    // Servers section: refresh active checkmark on the user-server rows
+    refreshServerChecks();
+
+    // ── Geo strip ──────────────────────────────────
+    const ip = s.egress || '';
+    if (ip) {
+      if (geoIp.textContent !== ip) geoIp.textContent = ip;
+      geoDot.className = 'geo-dot' + (vpnOn ? ' online' : '');
+
+      // Location line: flag + city + country
+      let loc = '';
+      if (s.country || s.city) {
+        const flag = flagEmoji(s.country);
+        const parts = [s.city, s.country].filter(Boolean).join(', ');
+        loc = flag + ' ' + parts;
+      }
+      if (geoLocation.textContent !== loc) geoLocation.textContent = loc;
+
+      // Ping with colour tier
+      if (s.ping != null) {
+        const pingStr = s.ping + ' ms';
+        if (geoPing.textContent !== pingStr) geoPing.textContent = pingStr;
+        const ms = Number(s.ping);
+        geoPing.className = 'geo-ping' + (ms < 100 ? ' fast' : ms < 250 ? ' medium' : ' slow');
+      } else {
+        geoPing.textContent = '';
+        geoPing.className = 'geo-ping';
+      }
+    } else {
+      geoIp.textContent       = '—';
+      geoLocation.textContent = '';
+      geoPing.textContent     = '';
+      geoDot.className        = 'geo-dot';
+    }
+
+    state = s;
+  }
+
+  /* ── Status fetch ──────────────────────────────── */
+  function fetchStatus(initial) {
+    return api('status')
+      .then(data => {
+        errBanner.classList.remove('show');
+        if (!data.auth) {
+          stopRefresh();
+          showScreen('login');
+          if (initial) hideLoader();
+          return;
+        }
+        if (initial) hideLoader();
+        showScreen('main');
+        applyState({
+          auth:       data.auth,
+          vpn:        data.vpn,
+          killswitch: data.killswitch,
+          mode:       data.mode,
+          active:     data.active,
+          server:     data.server,
+          egress:     data.egress  || '',
+          country:    data.country || '',
+          city:       data.city    || '',
+          ping:       data.ping    != null ? data.ping : null,
+        });
+      })
+      .catch(() => {
+        if (initial) hideLoader();
+        errBanner.classList.add('show');
+      });
+  }
+
+  function startRefresh() {
+    if (refreshTimer) return;
+    refreshTimer = setInterval(() => fetchStatus(false), 5000);
+  }
+
+  function stopRefresh() {
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  }
+
+  /* ── Login ─────────────────────────────────────── */
+  function doLogin() {
+    const pass = loginPass.value.trim();
+    if (!pass) return;
+    loginBtn.disabled = true;
+    loginError.textContent = '';
+    api('login', { method: 'POST', body: pass })
+      .then(data => {
+        if (data.ok) {
+          loginPass.value = '';
+          fetchStatus(false).then(() => {
+            showScreen('main');
+            startRefresh();
+            fetchUserServers();
+          });
+        } else if (data.locked) {
+          startLockCountdown(data.wait || 30);
+        } else {
+          loginError.textContent = 'Wrong password';
+          loginBtn.disabled = false;
+          loginPass.select();
+        }
+      })
+      .catch(() => {
+        loginError.textContent = 'No connection to the router';
+        loginBtn.disabled = false;
+      });
+  }
+
+  function startLockCountdown(secs) {
+    loginPass.disabled = true;
+    loginBtn.disabled = true;
+    if (lockCountdown) clearInterval(lockCountdown);
+    let remaining = secs;
+    const tick = () => {
+      loginError.textContent = 'Too many attempts, wait ' + remaining + ' sec';
+      if (remaining <= 0) {
+        clearInterval(lockCountdown);
+        lockCountdown = null;
+        loginPass.disabled = false;
+        loginBtn.disabled = false;
+        loginError.textContent = '';
+        loginPass.focus();
+      }
+      remaining--;
+    };
+    tick();
+    lockCountdown = setInterval(tick, 1000);
+  }
+
+  loginBtn.addEventListener('click', doLogin);
+  loginPass.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  /* ── Logout ────────────────────────────────────── */
+  logoutBtn.addEventListener('click', () => {
+    stopRefresh();
+    api('logout').finally(() => {
+      showScreen('login');
+      loginPass.value = '';
+      loginError.textContent = '';
+      speedResult.style.display = 'none';
+      speedDetail.textContent = 'Tap to measure';
+      speedChevron.style.display = '';
+      userServersList.innerHTML = '';
+    });
+  });
+
+  /* ── VPN Toggle ────────────────────────────────── */
+  vpnToggle.addEventListener('click', handleVpnToggle);
+  vpnToggle.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); handleVpnToggle(); }
+  });
+
+  function handleVpnToggle() {
+    if (vpnToggle.classList.contains('loading')) return;
+    vpnToggle.classList.add('loading');
+    const action = state.vpn ? 'vpn_off' : 'vpn_on';
+    api(action)
+      .then(() => fetchStatus(false))
+      .catch(() => errBanner.classList.add('show'))
+      .finally(() => vpnToggle.classList.remove('loading'));
+  }
+
+  /* ── Kill Switch Toggle ────────────────────────── */
+  ksToggle.addEventListener('click', handleKsToggle);
+  ksToggle.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); handleKsToggle(); }
+  });
+
+  function handleKsToggle() {
+    if (ksToggle.classList.contains('loading')) return;
+    ksToggle.classList.add('loading');
+    const action = state.killswitch ? 'ks_off' : 'ks_on';
+    api(action)
+      .then(() => fetchStatus(false))
+      .catch(() => errBanner.classList.add('show'))
+      .finally(() => ksToggle.classList.remove('loading'));
+  }
+
+  /* ── Protocol Segmented Control ────────────────── */
+  segProto.addEventListener('click', e => {
+    const btn = e.target.closest('.seg-option');
+    if (!btn) return;
+    const mode = btn.dataset.mode;
+    if (mode === state.mode) return;
+    api('proto', { query: 'p=' + mode })
+      .then(() => fetchStatus(false))
+      .catch(() => errBanner.classList.add('show'));
+  });
+
+  /* ── Speedtest ─────────────────────────────────── */
+  let speedLoading = false;
+
+  function handleSpeedtest() {
+    if (speedLoading) return;
+    speedLoading = true;
+    speedResult.style.display = 'none';
+    speedChevron.style.display = 'none';
+    speedDetail.innerHTML = '<span class="ip-spinner" style="margin-right:4px"></span>Measuring…';
+    speedtestRow.style.pointerEvents = 'none';
+
+    api('speedtest')
+      .then(data => {
+        const down = data.down != null ? String(data.down) : '—';
+        const up   = data.up   != null ? String(data.up)   : '—';
+        speedDownVal.textContent = down;
+        speedUpVal.textContent   = up;
+        speedDetail.textContent  = 'Last measurement';
+        speedResult.style.display = 'flex';
+      })
+      .catch(() => {
+        speedDetail.textContent = 'Measurement failed';
+      })
+      .finally(() => {
+        speedLoading = false;
+        speedChevron.style.display = '';
+        speedtestRow.style.pointerEvents = '';
+      });
+  }
+
+  speedtestRow.addEventListener('click', handleSpeedtest);
+  speedtestRow.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSpeedtest(); }
+  });
+
+  /* ── User Servers List ─────────────────────────── */
+  // A server tag is "active" if it's explicitly selected, or it's the
+  // server the "auto" group currently resolved to.
+  function isServerActive(tag) {
+    return state.mode === tag || (state.mode === 'auto' && state.active === tag);
+  }
+
+  // Re-evaluate the active checkmark on already-rendered rows (called on every
+  // status poll, since the auto-group's pick can change without a re-render).
+  function refreshServerChecks() {
+    userServersList.querySelectorAll('.row[data-tag]').forEach(row => {
+      const on = isServerActive(row.dataset.tag);
+      row.classList.toggle('server-row-active', on);
+      const chk = row.querySelector('.row-check');
+      if (chk) chk.style.visibility = on ? 'visible' : 'hidden';
+    });
+  }
+
+  function fetchUserServers() {
+    api('listservers')
+      .then(data => renderUserServers(data.servers || []))
+      .catch(() => {}); // fail silently
+  }
+
+  function renderUserServers(servers) {
+    userServersList.innerHTML = '';
+    serversEmpty.style.display = servers.length ? 'none' : '';
+    servers.forEach(srv => {
+      const isActive = isServerActive(srv.tag);
+      const row = document.createElement('div');
+      row.className = 'row row-tappable row-btn' + (isActive ? ' server-row-active' : '');
+      row.setAttribute('tabindex', '0');
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', srv.tag);
+      row.dataset.tag = srv.tag;
+
+      // Type badge color
+      const typeColor = srv.type === 'hysteria2' ? '#FF9F0A' : '#5E5CE6';
+
+      row.innerHTML =
+        '<div class="row-icon" style="background:' + typeColor + '22;border:0.5px solid ' + typeColor + '44;">' +
+          '<svg viewBox="0 0 16 16" fill="none">' +
+            '<rect x="2" y="3" width="12" height="4" rx="1.2" stroke="' + typeColor + '" stroke-width="1.3" opacity="0.9"/>' +
+            '<rect x="2" y="9" width="12" height="4" rx="1.2" stroke="' + typeColor + '" stroke-width="1.3" opacity="0.9"/>' +
+            '<circle cx="12.5" cy="5" r="1" fill="' + typeColor + '" opacity="0.8"/>' +
+            '<circle cx="12.5" cy="11" r="1" fill="' + typeColor + '" opacity="0.8"/>' +
+          '</svg>' +
+        '</div>' +
+        '<div class="row-content">' +
+          '<div class="row-label">' + escHtml(srv.tag.replace(/^srv-/, '')) + '</div>' +
+          '<div class="row-detail">' + escHtml(srv.server || '') + '</div>' +
+        '</div>' +
+        '<div class="row-check" style="visibility:' + (isActive ? 'visible' : 'hidden') + '">' +
+          '<svg width="16" height="16" viewBox="0 0 16 16" fill="none">' +
+            '<path d="M3 8.5l3.5 3.5L13 5" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '</svg>' +
+        '</div>' +
+        '<button class="row-trash" data-tag="' + escHtml(srv.tag) + '" aria-label="Delete server">' +
+          '<svg viewBox="0 0 17 17" fill="none">' +
+            '<path d="M3 4.5h11M6.5 4.5V3h4v1.5M5.5 4.5l.8 9h4.4l.8-9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '</svg>' +
+        '</button>';
+
+      // Select server on row tap (but not when tapping the trash button)
+      row.addEventListener('click', e => {
+        if (e.target.closest('.row-trash')) return;
+        if (state.mode === srv.tag) return;
+        api('proto', { query: 'p=' + encodeURIComponent(srv.tag) })
+          .then(() => fetchStatus(false))
+          .catch(() => errBanner.classList.add('show'));
+      });
+      row.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
+      });
+
+      // Delete button
+      row.querySelector('.row-trash').addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm('Delete server “' + (srv.name || srv.tag) + '”? This cannot be undone.')) return;
+        api('delserver', { query: 'p=' + encodeURIComponent(srv.tag) })
+          .then(d => {
+            if (d.ok) {
+              fetchUserServers();
+              // If deleted server was active, switch back to auto
+              if (state.mode === srv.tag) {
+                api('proto', { query: 'p=auto' }).then(() => fetchStatus(false));
+              }
+            }
+          })
+          .catch(() => errBanner.classList.add('show'));
+      });
+
+      userServersList.appendChild(row);
+    });
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /* ── Add Server Modal ──────────────────────────── */
+  function openAddServerModal() {
+    asName.value = '';
+    asLink.value = '';
+    asError.textContent = '';
+    asSave.disabled = false;
+    addserverModal.classList.add('open');
+    setTimeout(() => asName.focus(), 350);
+  }
+
+  function closeAddServerModal() {
+    addserverModal.classList.remove('open');
+  }
+
+  addserverRow.addEventListener('click', openAddServerModal);
+  addserverRow.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAddServerModal(); }
+  });
+
+  asCancel.addEventListener('click', closeAddServerModal);
+
+  addserverModal.addEventListener('click', e => {
+    if (e.target === addserverModal) closeAddServerModal();
+  });
+
+  asSave.addEventListener('click', doAddServer);
+
+  asLink.addEventListener('keydown', e => {
+    // Ctrl/Cmd+Enter to submit from textarea
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) doAddServer();
+  });
+
+  function doAddServer() {
+    const name = asName.value.trim();
+    const link = asLink.value.trim();
+    asError.textContent = '';
+
+    if (!name) { asError.textContent = 'Enter a name'; return; }
+    if (!link)  { asError.textContent = 'Paste a config link'; return; }
+    if (!link.startsWith('vless://') && !link.startsWith('hysteria2://')) {
+      asError.textContent = 'Link must start with vless:// or hysteria2://';
+      return;
+    }
+
+    asSave.disabled = true;
+    api('addserver', { method: 'POST', query: 'name=' + encodeURIComponent(name), body: link })
+      .then(data => {
+        if (data.ok) {
+          closeAddServerModal();
+          fetchUserServers();
+        } else {
+          asError.textContent = data.msg || 'Failed to add server';
+          asSave.disabled = false;
+        }
+      })
+      .catch(() => {
+        asError.textContent = 'No connection to the router';
+        asSave.disabled = false;
+      });
+  }
+
+  /* ── Change Password Modal ─────────────────────── */
+  function openPassModal() {
+    newPass.value = '';
+    confirmPass.value = '';
+    modalError.textContent = '';
+    modalSuccess.style.display = 'none';
+    modalSave.disabled = false;
+    passModal.classList.add('open');
+    setTimeout(() => newPass.focus(), 350);
+  }
+
+  function closePassModal() {
+    passModal.classList.remove('open');
+  }
+
+  chpassRow.addEventListener('click', openPassModal);
+  chpassRow.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPassModal(); }
+  });
+
+  modalCancel.addEventListener('click', closePassModal);
+
+  passModal.addEventListener('click', e => {
+    if (e.target === passModal) closePassModal();
+  });
+
+  confirmPass.addEventListener('keydown', e => { if (e.key === 'Enter') doChangePass(); });
+  modalSave.addEventListener('click', doChangePass);
+
+  function doChangePass() {
+    const p1 = newPass.value;
+    const p2 = confirmPass.value;
+    modalError.textContent = '';
+    modalSuccess.style.display = 'none';
+
+    if (p1.length < 6) {
+      modalError.textContent = 'Password must be at least 6 characters';
+      return;
+    }
+    if (p1 !== p2) {
+      modalError.textContent = 'Passwords do not match';
+      return;
+    }
+
+    modalSave.disabled = true;
+    api('setpass', { method: 'POST', body: p1 })
+      .then(data => {
+        if (data.ok) {
+          modalSuccess.style.display = 'flex';
+          newPass.value = '';
+          confirmPass.value = '';
+          setTimeout(closePassModal, 1800);
+        } else {
+          modalError.textContent = data.msg || 'Failed to save';
+          modalSave.disabled = false;
+        }
+      })
+      .catch(() => {
+        modalError.textContent = 'No connection to the router';
+        modalSave.disabled = false;
+      });
+  }
+
+  /* ── Boot ──────────────────────────────────────── */
+  fetchStatus(true).then(() => {
+    if (state.auth) {
+      startRefresh();
+      fetchUserServers();
+    }
+  });
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# never commit a binary or real server creds
+sing-box
+*.tar.gz
+servers/*.json
+!servers/server.example.json
+reality_full.json
+*.bak
