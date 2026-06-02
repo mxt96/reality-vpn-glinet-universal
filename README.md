@@ -23,12 +23,12 @@ On the router (SSH in as root):
 
 ```sh
 cd /tmp
-curl -fsSL https://github.com/OWNER/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz
+curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz
 cd reality-vpn-glinet-universal-main
 sh install.sh
 ```
 
-Replace `OWNER` with the GitHub account that hosts this repo. No `curl` on the
+No `curl` on the
 router? `opkg update && opkg install curl`. You can also download the repo ZIP
 from GitHub and `scp` it over instead.
 
