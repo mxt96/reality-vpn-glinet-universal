@@ -59,8 +59,8 @@ case "$ACT" in
       NM=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]name=\([A-Za-z0-9._-]*\).*/\1/p')
       LINK=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
       TAG="srv-$(date +%s)"; [ -n "$NM" ] && TAG="srv-$(printf '%s' "$NM" | tr -c 'A-Za-z0-9._-' '_')"
-      OUT=$(/etc/sing-box/parse-link.sh "$LINK" "$TAG" 2>/dev/null)
-      if [ -z "$OUT" ]; then emit; echo '{"ok":false,"msg":"Unrecognized link (supports vless reality / hysteria2)"}'; exit 0; fi
+      OUT=$(/etc/sing-box/parse-link.sh "$LINK" "$TAG" 2>/tmp/parse-perr)
+      if [ -z "$OUT" ]; then REASON=$(cat /tmp/parse-perr 2>/dev/null | sed 's/"/\\"/g'); emit; echo "{\"ok\":false,\"msg\":\"Bad link: ${REASON:-unrecognized}\"}"; exit 0; fi
       printf '%s' "$OUT" > "/etc/sing-box/servers/$TAG.json"
       R=$(/etc/sing-box/rebuild.sh 2>/dev/null | head -1)
       if [ "$R" = "OK" ]; then emit; echo "{\"ok\":true,\"tag\":\"$TAG\"}"; else rm -f "/etc/sing-box/servers/$TAG.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; emit; echo '{"ok":false,"msg":"Server config rejected"}'; fi

@@ -158,9 +158,10 @@ function M.add_server(args)
     if not tf then return { ok = false, msg = "io error" } end
     tf:write(link); tf:close()
 
-    local parsed = trim(sh('/etc/sing-box/parse-link.sh "$(cat /tmp/reality-addlink)" ' .. tag .. ' 2>/dev/null'))
+    local parsed = trim(sh('/etc/sing-box/parse-link.sh "$(cat /tmp/reality-addlink)" ' .. tag .. ' 2>/tmp/reality-perr'))
     if parsed == "" then
-        return { ok = false, msg = "Unrecognized link (vless reality / hysteria2)" }
+        local reason = trim(sh("cat /tmp/reality-perr 2>/dev/null"))
+        return { ok = false, msg = reason ~= "" and ("Bad link: " .. reason) or "Unrecognized link" }
     end
     local sf = io.open(SERVERS .. "/" .. tag .. ".json", "w")
     if not sf then return { ok = false, msg = "io error" } end

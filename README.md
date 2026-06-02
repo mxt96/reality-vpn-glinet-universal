@@ -62,6 +62,24 @@ binds `0.0.0.0:8088` and survives firmware upgrades via `/etc/sysupgrade.conf`.
 
 ## Add your server (by share-link)
 
+Paste a share-link in the web panel / native tab, or via SSH. The parser is
+**universal** — it accepts links from any panel (3x-ui, Hiddify, x-ui, v2rayN…)
+and tolerates their param-name differences (`pbk`/`publicKey`, `sid`/`shortId`,
+`fp`/`fingerprint`, `sni`/`serverName`…). Supported protocols:
+
+| Scheme | Notes |
+|---|---|
+| `vless://`     | Reality, TLS, or none; transports `tcp` / `ws` / `grpc` / `http` / `httpupgrade` |
+| `vmess://`     | base64-JSON; ws/grpc/tcp + TLS |
+| `trojan://`    | TLS (+ ws/grpc) |
+| `ss://`        | Shadowsocks (SIP002 and legacy base64) |
+| `hysteria2://` | also `hy2://`; obfs (salamander), insecure, alpn |
+| `tuic://`      | uuid:password |
+
+Decoding base64 schemes (`vmess://`, `ss://`) uses `openssl` (already required by
+the panel) when busybox has no `base64` applet. A bad link prints a clear reason
+(e.g. `vless reality: missing pbk/publicKey`).
+
 ```sh
 # Reality (VLESS):
 sh /etc/sing-box/add-server.sh 'vless://UUID@HOST:PORT?security=reality&pbk=PUBKEY&sid=SHORTID&sni=SNI&fp=chrome&flow=xtls-rprx-vision#myserver'
