@@ -1559,25 +1559,30 @@
   /* ── Apply state to UI (no flicker) ───────────── */
   function applyState(s) {
     const vpnOn = s.vpn;
+    // "tunneled" = a server is actually carrying traffic, not just sing-box being
+    // alive. With no server the config routes DIRECT, so the green/ON state must
+    // require an active non-direct outbound — otherwise the hero falsely reads
+    // "protected" whenever the process is up (e.g. autostarted after a reboot).
+    const tunneled = !!s.vpn && !!s.active && s.active !== 'direct';
 
-    // VPN toggle
+    // VPN toggle reflects the sing-box process (start/stop control)
     if (vpnToggle.classList.contains('on') !== vpnOn) {
       vpnOn ? vpnToggle.classList.add('on') : vpnToggle.classList.remove('on');
       vpnToggle.setAttribute('aria-checked', String(vpnOn));
     }
-    // Hero card
-    if (heroCard.classList.contains('vpn-on') !== vpnOn) {
-      vpnOn ? heroCard.classList.add('vpn-on') : heroCard.classList.remove('vpn-on');
+    // Hero card green glow only when actually tunneled
+    if (heroCard.classList.contains('vpn-on') !== tunneled) {
+      tunneled ? heroCard.classList.add('vpn-on') : heroCard.classList.remove('vpn-on');
     }
-    // Hero text
-    const wantText = vpnOn ? 'ON' : 'OFF';
+    // Hero text: ON only when tunneled; running-without-server shows DIRECT
+    const wantText = tunneled ? 'ON' : (vpnOn ? 'DIRECT' : 'OFF');
     if (heroText.textContent !== wantText) heroText.textContent = wantText;
-    heroText.style.color = vpnOn ? 'var(--green)' : 'var(--txt2)';
+    heroText.style.color = tunneled ? 'var(--green)' : 'var(--txt2)';
 
-    // Protocol badge
+    // Protocol badge active only when tunneled
     const protoStr = protoLabel(s.mode, s.active);
     if (heroProtoText.textContent !== protoStr) heroProtoText.textContent = protoStr;
-    vpnOn ? heroBadge.classList.add('active-badge') : heroBadge.classList.remove('active-badge');
+    tunneled ? heroBadge.classList.add('active-badge') : heroBadge.classList.remove('active-badge');
 
     // Segmented control
     segProto.querySelectorAll('.seg-option').forEach(btn => {

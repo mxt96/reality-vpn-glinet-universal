@@ -34,7 +34,7 @@
       return {
         loaded: false, err: false, busy: false,
         st: {},                 // last get_status result
-        vpnOn: false, ksOn: false,
+        vpnOn: false, ksOn: false, tunneled: false,
         servers: [], serversLoaded: false,
         addLink: "", addName: "", addMsg: "", adding: false,
         editTag: "", editLink: "", editName: "", editMsg: "", editing: false,
@@ -57,6 +57,10 @@
           if (r && r.err_msg) { self.err = true; return; }
           self.err = false; self.st = r || {};
           self.vpnOn = !!self.st.running; self.ksOn = !!self.st.killswitch;
+          // "tunneled" = a real server is actually carrying traffic, not just the
+          // sing-box process being alive. With no server the config routes DIRECT,
+          // so running===true but active==="direct" must NOT read as "protected".
+          self.tunneled = !!self.st.running && !!self.st.active && self.st.active !== "direct";
         }).catch(function () { self.spinning = false; self.loaded = true; self.err = true; });
       },
       loadServers: function () {
@@ -140,7 +144,8 @@
       var banner;
       if (!t.loaded) banner = h("div", { staticClass: "status-tips" }, [h("p", [t._v("Loading…")])]);
       else if (t.err) banner = h("div", { staticClass: "status-tips is-warning" }, [h("span", { staticClass: "iconfont icon-warning" }), h("p", [t._v("Could not read tunnel status.")])]);
-      else if (t.vpnOn) banner = h("div", { staticClass: "status-tips is-success" }, [h("p", [t._v("Connected — traffic is protected through the tunnel.")])]);
+      else if (t.tunneled) banner = h("div", { staticClass: "status-tips is-success" }, [h("p", [t._v("Connected — traffic is protected through the tunnel.")])]);
+      else if (t.vpnOn) banner = h("div", { staticClass: "status-tips is-warning" }, [h("span", { staticClass: "iconfont icon-warning" }), h("p", [t._v("sing-box is running but no server is selected — traffic is NOT tunneled (routing direct).")])]);
       else banner = h("div", { staticClass: "status-tips is-warning" }, [h("span", { staticClass: "iconfont icon-warning" }), h("p", [t._v("Disconnected — traffic is not tunneled.")])]);
 
       var loc = [s.city, s.country].filter(Boolean).join(", ");
@@ -227,7 +232,7 @@
             kv("Server", s.server),
             kv("Protocol", s.protocol)
           ]),
-          toggleRow("VPN", t.vpnOn ? "Tunnel active" : "Tunnel stopped", t.vpnOn, function (v) { t.toggleVpn(v); }),
+          toggleRow("VPN", t.tunneled ? "Tunnel active" : (t.vpnOn ? "Running — no server (direct)" : "Tunnel stopped"), t.vpnOn, function (v) { t.toggleVpn(v); }),
           toggleRow("Kill switch", "Block LAN if the tunnel drops", t.ksOn, function (v) { t.toggleKs(v); }),
           h("div", { staticClass: "btns", style: { marginTop: "14px" } }, [
             h("gl-button", { attrs: { loading: t.spinning }, on: { click: function () { t.refresh(); } } }, [t._v("Refresh")])
