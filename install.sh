@@ -147,6 +147,10 @@ START=99
 STOP=10
 USE_PROCD=1
 start_service() {
+  # No servers configured -> nothing to tunnel. Don't run sing-box at all, so the
+  # status honestly reads OFF instead of autostarting on boot into a DIRECT config
+  # and showing "running" with no tunnel. Internet stays up via normal routing.
+  [ -n "$(ls /etc/sing-box/servers/*.json 2>/dev/null)" ] || return 0
   # Remove any stale tun left by a hard kill (SIGKILL) of a previous instance,
   # otherwise sing-box hits "TUNSETIFF: device or resource busy" and crash-loops.
   ip link del singtun0 2>/dev/null
