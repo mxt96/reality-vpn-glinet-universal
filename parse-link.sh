@@ -63,7 +63,7 @@ fi
 # ---- reusable TLS + transport builders ------------------------------------
 # build_tls <sni> <insecure 1/empty> <alpn-csv> <fp> <reality-pbk> <reality-sid>
 build_tls(){
-  _sni="$1"; _ins="$2"; _alpn="$3"; _fp="$4"; _pbk="$5"; _sid="$6"
+  _sni="$1"; _ins="$2"; _alpn="$3"; _fp="$4"; _pbk="$5"; _sid="$6"; _quic="$7"
   [ -z "$_fp" ] && _fp=chrome
   _out="\"tls\": { \"enabled\": true, \"server_name\": \"$(jstr "$_sni")\""
   [ "$_ins" = "1" ] && _out="$_out, \"insecure\": true"
@@ -71,7 +71,10 @@ build_tls(){
     _a=$(printf '%s' "$_alpn" | awk -F, '{for(i=1;i<=NF;i++){printf (i>1?",":"")"\""$i"\""}}')
     _out="$_out, \"alpn\": [$_a]"
   fi
-  _out="$_out, \"utls\": { \"enabled\": true, \"fingerprint\": \"$(jstr "$_fp")\" }"
+  # uTLS only applies to TCP-based TLS. QUIC transports (hysteria2/tuic) reject a
+  # utls block -> sing-box fails to build the outbound and `sing-box check` errors,
+  # so rebuild.sh reverts to direct and the panel "add server" silently fails.
+  [ -z "$_quic" ] && _out="$_out, \"utls\": { \"enabled\": true, \"fingerprint\": \"$(jstr "$_fp")\" }"
   [ -n "$_pbk" ] && _out="$_out, \"reality\": { \"enabled\": true, \"public_key\": \"$(jstr "$_pbk")\", \"short_id\": \"$(jstr "$_sid")\" }"
   printf '%s }' "$_out"
 }
@@ -169,7 +172,7 @@ case "$SCHEME" in
     SNI=$(qp sni peer); [ -z "$SNI" ] && SNI="$HOST"
     INS=$(qp insecure allowInsecure); { [ "$INS" = "1" ] || [ "$INS" = "true" ]; } && INS=1 || INS=
     ALPN=$(qp alpn); OBFS=$(qp obfs); OBFSPW=$(qp obfs-password obfsParam)
-    TLSBLK=$(build_tls "$SNI" "$INS" "$ALPN" "" "" "")
+    TLSBLK=$(build_tls "$SNI" "$INS" "$ALPN" "" "" "" quic)
     J="{ \"type\": \"hysteria2\", \"tag\": \"$(jstr "$TAG")\", \"server\": \"$(jstr "$HOST")\", \"server_port\": $PORT, \"password\": \"$(jstr "$USERINFO")\""
     [ "$OBFS" = "salamander" ] && [ -n "$OBFSPW" ] && J="$J, \"obfs\": { \"type\": \"salamander\", \"password\": \"$(jstr "$OBFSPW")\" }"
     J="$J, $TLSBLK"
@@ -181,7 +184,7 @@ case "$SCHEME" in
     SNI=$(qp sni peer); [ -z "$SNI" ] && SNI="$HOST"; ALPN=$(qp alpn)
     INS=$(qp insecure allowInsecure); { [ "$INS" = "1" ] || [ "$INS" = "true" ]; } && INS=1 || INS=
     CC=$(qp congestion_control congestion); [ -z "$CC" ] && CC=bbr
-    TLSBLK=$(build_tls "$SNI" "$INS" "$ALPN" "" "" "")
+    TLSBLK=$(build_tls "$SNI" "$INS" "$ALPN" "" "" "" quic)
     emit "{ \"type\": \"tuic\", \"tag\": \"$(jstr "$TAG")\", \"server\": \"$(jstr "$HOST")\", \"server_port\": $PORT, \"uuid\": \"$(jstr "$UUID")\", \"password\": \"$(jstr "$PASS")\", \"congestion_control\": \"$(jstr "$CC")\", $TLSBLK }"
     ;;
   *) die "unsupported protocol: $SCHEME (supported: vless vmess trojan ss hysteria2 tuic)" ;;
