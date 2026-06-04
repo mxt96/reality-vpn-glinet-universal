@@ -70,9 +70,6 @@ TAG=$(curl -4 -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/late
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$TAG" ] || die "could not fetch latest sing-box release tag (no internet / GitHub blocked)."
 VER=${TAG#v}
-URL="https://github.com/SagerNet/sing-box/releases/download/${TAG}/sing-box-${VER}-${ASSET}.tar.gz"
-say "downloading sing-box $TAG ($ASSET)"
-say "  $URL"
 # download (~20MB tarball) + extracted sing-box (~60MB) need a roomy dir. /tmp is
 # tmpfs (RAM) and too small on tiny routers (E750/AR300M) -> "No space left". Pick a
 # writable mount with >=85MB free (microSD/USB/overlay); die clearly if none.
@@ -89,44 +86,45 @@ fi
 [ -n "$WORKBASE" ] || die "need ~85MB free to unpack sing-box, none found. Insert a microSD card (it auto-mounts) and re-run."
 say "work/extract dir: $WORKBASE ($(df -h "$WORKBASE" 2>/dev/null | awk 'NR==2{print $4}') free)"
 SDHOME="$WORKBASE"
-TMP=$(mktemp -d "$WORKBASE/sbdl.XXXXXX") || die "mktemp failed"
-trap 'rm -rf "$TMP"' EXIT
-curl -4 -fL --retry 3 --connect-timeout 15 -o "$TMP/sb.tgz" "$URL" || die "download failed ($URL)"
-tar xzf "$TMP/sb.tgz" -C "$TMP" || die "extract failed (corrupt download?)"
-BIN=$(find "$TMP" -name sing-box -type f | head -1)
-[ -n "$BIN" ] || die "sing-box binary not found in archive"
-chmod +x "$BIN"
-
-# ---- 3) verify the binary matches the expected arch/endianness -------------
-# Verify it's an ELF (catches corrupt/HTML-error downloads) with ONLY the most basic
-# busybox tools (head+grep). od/file/hexdump are often ABSENT on router busybox.
-SIG=$(file -b "$BIN" 2>/dev/null || true)
-head -c 4 "$BIN" 2>/dev/null | grep -q ELF || die "downloaded file is not an ELF binary - corrupt download? re-run to retry."
-if [ -n "$SIG" ] && ! echo "$SIG" | grep -Eq "$EXPECT"; then
-  die "binary ($SIG) does not match expected '$EXPECT' for $ASSET - wrong arch download."
-fi
-say "binary OK (ELF${SIG:+; $SIG})"
-
-# ---- 4) flash-aware install of the binary ----------------------------------
-# Try /usr/bin first; if rootfs is tight, fall back to microSD with a PATH symlink.
 mkdir -p "$SBDIR/servers"
-BINSZ=$(wc -c < "$BIN")
-FREE=$(df -k /usr/bin 2>/dev/null | awk 'NR==2{print $4*1024}')
-NEED=$((BINSZ + 2*1024*1024))
-TARGET="$SBDIR/sing-box"
-if [ -n "$FREE" ] && [ "$FREE" -lt "$NEED" ]; then
-  say "rootfs low on space (${FREE}B free) -> installing binary to $SDHOME/sing-box/"
-  mkdir -p "$SDHOME/sing-box"
-  mv "$BIN" "$SDHOME/sing-box/sing-box" && chmod +x "$SDHOME/sing-box/sing-box"
-  ln -sf "$SDHOME/sing-box/sing-box" "$SBDIR/sing-box"
-  ln -sf "$SDHOME/sing-box/sing-box" /usr/bin/sing-box 2>/dev/null || true
-else
-  mv "$BIN" "$TARGET" && chmod +x "$TARGET"
-  ln -sf "$TARGET" /usr/bin/sing-box 2>/dev/null || true
-fi
-VOUT=$("$SBDIR/sing-box" version 2>/dev/null | head -1)
-[ -n "$VOUT" ] || die "sing-box did not run (wrong arch / corrupt). Re-run; if it persists, tell me."
-say "installed: $VOUT"
+
+# ---- 3+4) download + verify + install (musl-aware) -------------------------
+# OpenWrt is musl. SagerNet's DEFAULT arm64/amd64 asset is glibc-dynamic and will
+# NOT run on musl ("ld-linux not found"); they also publish an explicit `-musl`
+# (static) asset. So prefer `${ASSET}-musl`, fall back to the plain `${ASSET}`
+# (mips/armv7 have no -musl suffix and the plain build is already musl-static).
+# Verify each candidate is an ELF of the right arch AND that it actually RUNS.
+VOUT=""
+for SUF in "-musl" ""; do
+  URL="https://github.com/SagerNet/sing-box/releases/download/${TAG}/sing-box-${VER}-${ASSET}${SUF}.tar.gz"
+  say "trying sing-box $TAG (${ASSET}${SUF})"
+  TMP=$(mktemp -d "$SDHOME/sbdl.XXXXXX") || continue
+  if ! curl -4 -fL --retry 2 --connect-timeout 15 -o "$TMP/sb.tgz" "$URL"; then rm -rf "$TMP"; continue; fi
+  if ! tar xzf "$TMP/sb.tgz" -C "$TMP" 2>/dev/null; then rm -rf "$TMP"; continue; fi
+  BIN=$(find "$TMP" -name sing-box -type f | head -1)
+  [ -n "$BIN" ] || { rm -rf "$TMP"; continue; }
+  chmod +x "$BIN"
+  head -c 4 "$BIN" 2>/dev/null | grep -q ELF || { rm -rf "$TMP"; continue; }
+  SIG=$(file -b "$BIN" 2>/dev/null || true)
+  if [ -n "$SIG" ] && ! echo "$SIG" | grep -Eq "$EXPECT"; then rm -rf "$TMP"; continue; fi
+  # flash-aware install: /usr/bin if room, else microSD with a PATH symlink
+  BINSZ=$(wc -c < "$BIN"); FREE=$(df -k /usr/bin 2>/dev/null | awk 'NR==2{print $4*1024}'); NEED=$((BINSZ + 2*1024*1024))
+  if [ -n "$FREE" ] && [ "$FREE" -lt "$NEED" ]; then
+    mkdir -p "$SDHOME/sing-box"
+    mv "$BIN" "$SDHOME/sing-box/sing-box" && chmod +x "$SDHOME/sing-box/sing-box"
+    ln -sf "$SDHOME/sing-box/sing-box" "$SBDIR/sing-box"
+    ln -sf "$SDHOME/sing-box/sing-box" /usr/bin/sing-box 2>/dev/null || true
+  else
+    mv "$BIN" "$SBDIR/sing-box" && chmod +x "$SBDIR/sing-box"
+    ln -sf "$SBDIR/sing-box" /usr/bin/sing-box 2>/dev/null || true
+  fi
+  rm -rf "$TMP"
+  # decisive test: does it actually run on THIS libc? (glibc-on-musl fails here)
+  VOUT=$("$SBDIR/sing-box" version 2>/dev/null | head -1)
+  if [ -n "$VOUT" ]; then say "installed: $VOUT (asset ${ASSET}${SUF})"; break; fi
+  say "  ${ASSET}${SUF} downloaded but did not run on this libc -> trying next variant"
+done
+[ -n "$VOUT" ] || die "sing-box did not run (no musl/static build matched arch '$ASSET'). Tell me the router model."
 
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh \
