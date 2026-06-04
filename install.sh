@@ -264,7 +264,11 @@ if [ -d /usr/lib/oui-httpd/rpc ] && [ -d /usr/share/oui/menu.d ] && [ -d /www/vi
     # cached lua so the new `reality` rpc handler loads (a plain reload won't);
     # BUT a full nginx restart breaks GL's post-login session websocket bridge,
     # so we MUST immediately rebuild it with gl-ngx-session. Do BOTH, in order.
-    /etc/init.d/nginx restart 2>/dev/null; /etc/init.d/gl-ngx-session restart 2>/dev/null
+    /etc/init.d/nginx restart 2>/dev/null || true; /etc/init.d/gl-ngx-session restart 2>/dev/null || true
+    # nginx needs a moment to come back up before the self-diagnostic curls below;
+    # otherwise they race the restart and (under set -e) a transient curl failure
+    # (exit 56) aborts the install right before step 10 / the DONE message.
+    sleep 3
     # survive firmware upgrades
     for p in /usr/share/oui/menu.d/reality.json /www/views/gl-sdk4-ui-reality.common.js.gz \
              /www/views/gl-sdk4-ui-reality.common.js \
@@ -274,8 +278,8 @@ if [ -d /usr/lib/oui-httpd/rpc ] && [ -d /usr/share/oui/menu.d ] && [ -d /www/vi
     # self-diagnostic (prints to the install log so we can confirm the tab will load,
     # or pinpoint a /#/login bounce: view 404 = serving issue, empty rpc = handler issue,
     # gl-ngx-session ABSENT = session-bridge issue).
-    VJS=$(curl -s -o /dev/null -w '%{http_code}/%{size_download}b' --max-time 5 http://127.0.0.1/views/gl-sdk4-ui-reality.common.js 2>/dev/null)
-    VGZ=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H 'Accept-Encoding: gzip' http://127.0.0.1/views/gl-sdk4-ui-reality.common.js 2>/dev/null)
+    VJS=$(curl -s -o /dev/null -w '%{http_code}/%{size_download}b' --max-time 5 http://127.0.0.1/views/gl-sdk4-ui-reality.common.js 2>/dev/null || true)
+    VGZ=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H 'Accept-Encoding: gzip' http://127.0.0.1/views/gl-sdk4-ui-reality.common.js 2>/dev/null || true)
     RPCJ=$(curl -s --max-time 5 -X POST http://127.0.0.1/rpc -H 'glinet: 1' -d '{"jsonrpc":"2.0","id":1,"method":"call","params":["","reality","get_status",{}]}' 2>/dev/null | head -c 50)
     GLS=$([ -x /etc/init.d/gl-ngx-session ] && echo present || echo ABSENT)
     say "diag: view.js=$VJS gz_code=$VGZ gl-ngx-session=$GLS rpc=${RPCJ:-EMPTY}"
