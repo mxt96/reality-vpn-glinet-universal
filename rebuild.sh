@@ -71,7 +71,10 @@ JSON
 if "$SB" check -c "$CFG" 2>/tmp/sb-check.err; then
   [ -x /etc/init.d/sing-box ] && /etc/init.d/sing-box restart 2>/dev/null
   sleep 6
-  sh "$SBDIR/postup.sh" 2>/dev/null
+  # MUST silence stdout too: on fw4/iptables-nft routers postup's iptables commands
+  # print rule lines, which would otherwise pollute this script's output and make
+  # callers that read the first line (panel addserver/delserver) misread "OK".
+  sh "$SBDIR/postup.sh" >/dev/null 2>&1
   echo OK
 else
   cp -f "$CFG.bak" "$CFG" 2>/dev/null

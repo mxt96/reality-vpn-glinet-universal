@@ -84,6 +84,10 @@ ks_set_desired(){
   true
 }
 
+# VPN desired-on? (the supervisor's source of truth; also read by panel/ + native tab
+# to make the VPN toggle sticky through auto-reconnect). Independent of the killswitch.
+vpn_desired(){ [ "$(cat "$SBDIR/vpn.enabled" 2>/dev/null)" = "1" ]; }
+
 # Reconcile live rules with desired state. INDEPENDENT of the VPN's on/off (mason):
 # armed -> block holds regardless of whether our tunnel is up; disarmed -> remove.
 ks_enforce(){
