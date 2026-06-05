@@ -127,7 +127,7 @@ done
 [ -n "$VOUT" ] || die "sing-box did not run (no musl/static build matched arch '$ASSET'). Tell me the router model."
 
 # ---- 5) scripts ------------------------------------------------------------
-for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh \
+for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
          add-server.sh list-servers.sh del-server.sh; do
   cp "$D/$s" "$SBDIR/$s" && chmod +x "$SBDIR/$s"
 done
@@ -149,6 +149,10 @@ start_service() {
   # status honestly reads OFF instead of autostarting on boot into a DIRECT config
   # and showing "running" with no tunnel. Internet stays up via normal routing.
   [ -n "$(ls /etc/sing-box/servers/*.json 2>/dev/null)" ] || return 0
+  # Respect the user's desired state: only autostart on boot if the VPN was left ON.
+  # The supervisor (watchdog.sh, cron) is what (re)starts it when desired -> this also
+  # keeps boot honest and lets a user-OFF survive a reboot.
+  [ "$(cat /etc/sing-box/vpn.enabled 2>/dev/null)" = "1" ] || return 0
   # Remove any stale tun left by a hard kill (SIGKILL) of a previous instance,
   # otherwise sing-box hits "TUNSETIFF: device or resource busy" and crash-loops.
   ip link del singtun0 2>/dev/null
@@ -163,8 +167,15 @@ chmod +x /etc/init.d/sing-box
 
 # ---- 7) generate base config (0 servers -> direct, internet up) ------------
 sh "$SBDIR/rebuild.sh" >/dev/null 2>&1 || true
-# fresh install with no servers: leave VPN off until a server is added
-[ -n "$(ls "$SBDIR"/servers/*.json 2>/dev/null)" ] || /etc/init.d/sing-box stop 2>/dev/null || true
+# Desired-state flag (source of truth for the supervisor + boot autostart + KS gate).
+# Preserve an existing choice across upgrades; otherwise default ON iff servers are
+# already configured (matches the previous "start if servers exist" behaviour).
+if [ ! -f "$SBDIR/vpn.enabled" ]; then
+  if [ -n "$(ls "$SBDIR"/servers/*.json 2>/dev/null)" ]; then echo 1 > "$SBDIR/vpn.enabled"; else echo 0 > "$SBDIR/vpn.enabled"; fi
+fi
+[ -f "$SBDIR/ks.enabled" ] || echo 0 > "$SBDIR/ks.enabled"
+# fresh install with no servers (or VPN left off): leave sing-box stopped.
+[ "$(cat "$SBDIR/vpn.enabled" 2>/dev/null)" = "1" ] || /etc/init.d/sing-box stop 2>/dev/null || true
 
 # ---- 8) firewall: fw4/nftables vs fw3/iptables -----------------------------
 # Detect by the live nft table (definitive — `[ -x /sbin/fw4 ]` is unreliable, and

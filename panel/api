@@ -11,8 +11,10 @@ SID=$(printf '%s' "$HTTP_COOKIE" | sed -n 's/.*sid=\([A-Za-z0-9]\{8,\}\).*/\1/p'
 valid(){ [ -n "$SID" ] && [ -f "$SESSDIR/$SID" ] && [ "$(date +%s)" -lt "$(cat "$SESSDIR/$SID" 2>/dev/null || echo 0)" ]; }
 check_pw(){ S=$(grep '^root:' /etc/shadow | cut -d: -f2); A=$(printf '%s' "$S" | cut -d'$' -f2); SA=$(printf '%s' "$S" | cut -d'$' -f3); case "$A" in 1) F=-1;; 5) F=-5;; 6) F=-6;; apr1) F=-apr1;; *) F=-5;; esac; [ -n "$SA" ] && [ "$(openssl passwd $F -salt "$SA" "$1" 2>/dev/null)" = "$S" ]; }
 now_of(){ curl -s --max-time 3 "$API/proxies/$1" 2>/dev/null | sed -n 's/.*"now": *"\([A-Za-z0-9._-]*\)".*/\1/p'; }
-ks_on(){ iptables -C FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null || { iptables -I FORWARD -i br-lan ! -o singtun0 -j DROP; iptables -I FORWARD -i br-lan -o br-lan -j ACCEPT; }; }
-ks_off(){ iptables -D FORWARD -i br-lan -o br-lan -j ACCEPT 2>/dev/null; iptables -D FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null; }
+# killswitch backend (fw4/nftables vs fw3/iptables) + desired-state live in ks-lib.sh
+. /etc/sing-box/ks-lib.sh 2>/dev/null
+ks_on(){ ks_set_desired 1; ks_enforce; }
+ks_off(){ ks_set_desired 0; ks_enforce; }
 
 ACT=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*action=\([a-z_]*\).*/\1/p')
 IP=$(printf '%s' "${REMOTE_ADDR:-x}" | tr -c 'A-Za-z0-9.' '_'); BF="$BFDIR/$IP"
@@ -37,14 +39,14 @@ if ! valid; then emit; echo '{"auth":false}'; exit 0; fi
 
 case "$ACT" in
   logout) rm -f "$SESSDIR/$SID"; emit; echo '{"ok":true}'; exit 0;;
-  vpn_on) /etc/init.d/sing-box start >/dev/null 2>&1; sleep 1; [ -f "$PU" ] && sh "$PU" >/dev/null 2>&1; (/etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
+  vpn_on) echo 1 > /etc/sing-box/vpn.enabled; /etc/init.d/sing-box start >/dev/null 2>&1; sleep 1; [ -f "$PU" ] && sh "$PU" >/dev/null 2>&1; ks_enforce 2>/dev/null; (/etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
   speedtest)
     DB=$(curl -4 -s --max-time 12 -o /dev/null -w '%{speed_download}' 'https://speed.cloudflare.com/__down?bytes=30000000' 2>/dev/null)
     UB=$(head -c 8000000 /dev/zero 2>/dev/null | curl -4 -s --max-time 12 -o /dev/null -w '%{speed_upload}' --data-binary @- 'https://speed.cloudflare.com/__up' 2>/dev/null)
     DM=$(awk "BEGIN{printf \"%.1f\", ${DB:-0}*8/1000000}")
     UM=$(awk "BEGIN{printf \"%.1f\", ${UB:-0}*8/1000000}")
     emit; echo "{\"down\":\"$DM\",\"up\":\"$UM\"}"; exit 0;;
-  vpn_off) ks_off; /etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; ip rule del pref 500 >/dev/null 2>&1; (sleep 3; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
+  vpn_off) echo 0 > /etc/sing-box/vpn.enabled; /etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; ip rule del pref 500 >/dev/null 2>&1; ks_enforce 2>/dev/null; (sleep 3; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
   ks_on) ks_on;;
   ks_off) ks_off;;
   proto) P=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p'); case "$P" in auto|hy2-out|reality-out|srv-*) curl -s --max-time 4 -X PUT "$API/proxies/select" -d "{\"name\":\"$P\"}" >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;; esac;;
@@ -74,8 +76,10 @@ case "$ACT" in
       emit; echo '{"ok":true}'; exit 0;;
   status) :;;
 esac
-VPN=$(pidof sing-box >/dev/null 2>&1 && echo true || echo false)
-KS=$(iptables -C FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null && echo true || echo false)
+# toggle reflects DESIRED state (sticky through auto-reconnect); egress/ping below
+# convey the live connection. KS reflects user intent (held even while VPN is off).
+VPN=$(vpn_desired && echo true || echo false)
+KS=$(ks_desired && echo true || echo false)
 MODE=$(now_of select); ACTIVE="$MODE"; [ "$MODE" = "auto" ] && ACTIVE=$(now_of auto)
 G=$(cat /tmp/lk-geo 2>/dev/null); EG=$(printf '%s' "$G"|cut -d'|' -f2); CO=$(printf '%s' "$G"|cut -d'|' -f3); CI=$(printf '%s' "$G"|cut -d'|' -f4); PG=$(printf '%s' "$G"|cut -d'|' -f5)
 [ -z "$G" ] && (/etc/sing-box/geo-refresh.sh &) 2>/dev/null

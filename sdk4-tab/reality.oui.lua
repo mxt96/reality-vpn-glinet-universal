@@ -37,8 +37,10 @@ end
 
 -- ---- status -------------------------------------------------------------
 local function compute_status(args)
-    local vpn = trim(sh("pidof sing-box >/dev/null 2>&1 && echo true || echo false"))
-    local ks  = trim(sh("iptables -C FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null && echo true || echo false"))
+    -- toggle reflects DESIRED state (sticky through auto-reconnect); the live tunnel
+    -- is conveyed by `active`/egress below. KS reflects user intent.
+    local vpn = trim(sh("[ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = \"1\" ] && echo true || echo false"))
+    local ks  = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_desired && echo true || echo false"))
     local mode = now_of("select")
     local active = mode
     if mode == "auto" then active = now_of("auto") end
@@ -106,14 +108,19 @@ end
 function M.set_enabled(args)
     local on = args and args.on
     if on == true or on == "true" or on == 1 then
-        sh("/etc/init.d/sing-box start >/dev/null 2>&1; sleep 1; " ..
+        -- persist desired=ON so the supervisor keeps the tunnel up / auto-reconnects
+        sh("echo 1 > /etc/sing-box/vpn.enabled; " ..
+           "/etc/init.d/sing-box start >/dev/null 2>&1; sleep 1; " ..
            "[ -f /etc/sing-box/postup.sh ] && sh /etc/sing-box/postup.sh >/dev/null 2>&1; " ..
+           ". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_enforce; " ..
            "(/etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1", 20)
     else
-        sh("iptables -D FORWARD -i br-lan -o br-lan -j ACCEPT 2>/dev/null; " ..
-           "iptables -D FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null; " ..
+        -- persist desired=OFF; ks_enforce releases the killswitch block (can't strand)
+        sh("echo 0 > /etc/sing-box/vpn.enabled; " ..
            "/etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; " ..
-           "ip rule del pref 500 >/dev/null 2>&1; (sleep 3; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1", 15)
+           "ip rule del pref 500 >/dev/null 2>&1; " ..
+           ". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_enforce; " ..
+           "(sleep 3; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1", 15)
     end
     return { ok = true }
 end
@@ -121,16 +128,12 @@ end
 -- ---- killswitch ---------------------------------------------------------
 function M.set_killswitch(args)
     local on = args and args.on
+    -- backend-aware (fw4/nftables vs fw3/iptables) + desired-state via ks-lib.sh;
+    -- ks_set_desired also mirrors into GL's native killswitch uci for UI sync.
     if on == true or on == "true" or on == 1 then
-        sh("iptables -C FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null || " ..
-           "{ iptables -I FORWARD -i br-lan ! -o singtun0 -j DROP; iptables -I FORWARD -i br-lan -o br-lan -j ACCEPT; }")
-        -- mirror state into GL's native killswitch flag so the built-in UI stays in sync
-        -- (display/state mirror only — our iptables rule above is the real enforcer; no route_policy reload)
-        sh("uci -q set route_policy.@rule[0].killswitch='1' && uci -q commit route_policy")
+        sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_set_desired 1; ks_enforce")
     else
-        sh("iptables -D FORWARD -i br-lan -o br-lan -j ACCEPT 2>/dev/null; " ..
-           "iptables -D FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null")
-        sh("uci -q set route_policy.@rule[0].killswitch='0' && uci -q commit route_policy")
+        sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_set_desired 0; ks_enforce")
     end
     return { ok = true }
 end
