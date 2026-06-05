@@ -103,8 +103,8 @@
         }).catch(function () { self.adding = false; self.addMsg = "Failed to add server"; });
       },
       delServer: function (tag) {
-        if (typeof window !== "undefined" && window.confirm &&
-            !window.confirm("Delete server " + tag + "?")) return;
+        // No window.confirm() here: GL's embedded panel webview can silently
+        // suppress confirm() (returns false) -> the delete would never fire.
         var self = this; this.busy = true;
         call("del_server", { tag: tag }).then(function () {
           self.busy = false; self.cancelEdit(); self.loadServers();
@@ -210,8 +210,7 @@
         var headRow = h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: isEditing ? "none" : "1px solid rgba(0,0,0,0.06)" } }, [
           h("div", [ h("div", { style: { fontSize: "14px", fontWeight: "500" } }, [t._v(sv.tag)]), h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sv.type || "?") + " · " + (sv.server || ""))]) ]),
           h("div", { style: { whiteSpace: "nowrap" } }, [
-            h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy || (t.editTag !== "" && !isEditing) }, on: { click: function () { isEditing ? t.cancelEdit() : t.startEdit(sv); } } }, [t._v(isEditing ? "Cancel" : "Edit")]),
-            (!isEditing) ? h("gl-button", { staticClass: "btn-item", style: { marginLeft: "8px" }, attrs: { type: "abort", disabled: t.busy || t.editTag !== "" }, on: { click: function () { t.delServer(sv.tag); } } }, [t._v("Delete")]) : null
+            h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy || (t.editTag !== "" && !isEditing) }, on: { click: function () { isEditing ? t.cancelEdit() : t.startEdit(sv); } } }, [t._v(isEditing ? "Cancel" : "Edit")])
           ])
         ]);
         if (!isEditing) return headRow;
