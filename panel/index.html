@@ -1839,8 +1839,8 @@
     updateDetail.textContent = 'Updating… the page will reload automatically in ~1 minute.';
     api('update').then(r => { if (r && r.msg) updateDetail.textContent = r.msg + ' (page reloads automatically)'; })
                  .catch(() => { updateDetail.textContent = 'Update started (panel restarting)…'; });
-    // the installer restarts the panel; reload once it is back to show the new version
-    setTimeout(function () { location.reload(); }, 80000);
+    // update runs via cron (~1 min) then installs (~40s); reload after it should be done
+    setTimeout(function () { location.reload(); }, 120000);
   }
 
   /* ── VPN Toggle ────────────────────────────────── */

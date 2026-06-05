@@ -252,7 +252,11 @@ if [ -f "$D/panel/index.html" ] && [ -f "$D/panel/api" ] && [ -f "$D/panel/vpn-p
   cp "$D/panel/api" /www-vpn/cgi-bin/api && chmod +x /www-vpn/cgi-bin/api
   cp "$D/panel/vpn-panel.init" /etc/init.d/vpn-panel && chmod +x /etc/init.d/vpn-panel
   /etc/init.d/vpn-panel enable 2>/dev/null || true
-  /etc/init.d/vpn-panel restart 2>/dev/null || /etc/init.d/vpn-panel start 2>/dev/null || true
+  # `start` (not `restart`): uhttpd re-reads the CGI + index.html per request, so a
+  # restart isn't needed to pick up panel changes — and restarting would kill an
+  # in-progress self-update (the Update button re-runs this installer). start is a
+  # no-op when already running, and starts it on a fresh install.
+  /etc/init.d/vpn-panel start 2>/dev/null || true
   sleep 1
   # Verify the panel is actually serving on :8088 (honest report, not just "deployed").
   PC=$(curl -ks -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8088/ 2>/dev/null)

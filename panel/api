@@ -80,18 +80,26 @@ case "$ACT" in
       UPD=false; [ "$LAT" != unknown ] && [ "$INST" != "$LAT" ] && UPD=true
       emit; echo "{\"installed\":\"$INST\",\"latest\":\"$LAT\",\"update\":$UPD}"; exit 0;;
   update)
+      # The update re-runs the installer, which restarts services — so it must NOT
+      # run inside uhttpd's process tree (it would be killed, and routers here have
+      # no setsid/start-stop-daemon). Detach via the router's own cron, which is an
+      # independent process. A one-shot, self-removing, lock-guarded cron line.
       cat > /tmp/sb-update.sh <<'UPD'
-cd /tmp && rm -rf reality-vpn-glinet-universal-main && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz && cd reality-vpn-glinet-universal-main && sh install.sh
+#!/bin/sh
+[ -f /tmp/sb-update.running ] && exit 0
+touch /tmp/sb-update.running
+cd /tmp && rm -rf reality-vpn-glinet-universal-main \
+  && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz \
+  && cd reality-vpn-glinet-universal-main && sh install.sh
+sed -i '\#/tmp/sb-update.sh#d' /etc/crontabs/root 2>/dev/null
+/etc/init.d/cron restart 2>/dev/null
+rm -f /tmp/sb-update.running
 UPD
-      # detach from uhttpd (the install restarts the panel) so the update survives.
-      if command -v setsid >/dev/null 2>&1; then
-        setsid sh /tmp/sb-update.sh </dev/null >/tmp/reality-update.log 2>&1 &
-      elif command -v start-stop-daemon >/dev/null 2>&1; then
-        start-stop-daemon -S -b -x /bin/sh -- /tmp/sb-update.sh
-      else
-        sh /tmp/sb-update.sh </dev/null >/tmp/reality-update.log 2>&1 &
-      fi
-      emit; echo "{\"ok\":true,\"msg\":\"Updating in background — page will reload in ~1 min\"}"; exit 0;;
+      chmod +x /tmp/sb-update.sh
+      touch /etc/crontabs/root
+      grep -q '/tmp/sb-update.sh' /etc/crontabs/root 2>/dev/null || echo '* * * * * /bin/sh /tmp/sb-update.sh' >> /etc/crontabs/root
+      /etc/init.d/cron enable >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1
+      emit; echo "{\"ok\":true,\"msg\":\"Update scheduled — installs within ~1-2 min, page reloads\"}"; exit 0;;
   status) :;;
 esac
 # toggle reflects DESIRED state (sticky through auto-reconnect); egress/ping below
