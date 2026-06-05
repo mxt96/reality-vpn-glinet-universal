@@ -140,6 +140,9 @@ rm -f "$SBDIR/servers/server.example.json" 2>/dev/null || true
 
 # record the installed version so the panel can show it + check for updates
 if [ -f "$D/VERSION" ]; then cp "$D/VERSION" "$SBDIR/version"; else echo "unknown" > "$SBDIR/version"; fi
+# post-install marker (fresh<10min) — the panel shows "✅ updated to vX" after the
+# Update button re-runs this installer, then it expires.
+cp -f "$SBDIR/version" "$SBDIR/.updated_to" 2>/dev/null || true
 say "installed version: $(cat "$SBDIR/version" 2>/dev/null)"
 
 # ---- 6) sing-box service ---------------------------------------------------

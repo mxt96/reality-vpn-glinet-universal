@@ -1656,6 +1656,12 @@
 
     // Installed version
     if (verInstalled && s.version) verInstalled.textContent = 'v' + s.version;
+    // one-shot "✅ updated to vX" confirmation after the Update button re-installed
+    if (s.updated_to) {
+      if (verLatest) { verLatest.textContent = '✓ updated'; verLatest.style.color = 'var(--green)'; }
+      if (checkupdateDetail) checkupdateDetail.textContent = '✅ Updated to v' + s.updated_to + ' (latest)';
+      if (updateRow) updateRow.style.display = 'none';
+    }
 
     // Servers section: refresh active checkmark on the user-server rows
     refreshServerChecks();
@@ -1829,10 +1835,12 @@
     }).catch(() => { checkupdateDetail.textContent = 'Check failed'; });
   }
   function handleUpdate() {
-    if (!confirm('Update to the latest version now? The panel will restart briefly.')) return;
-    updateDetail.textContent = 'Updating… refresh the page in ~1 minute.';
-    api('update').then(r => { updateDetail.textContent = (r && r.msg) ? r.msg : 'Updating…'; })
+    if (!confirm('Update to the latest version now? The panel will restart and this page will reload automatically.')) return;
+    updateDetail.textContent = 'Updating… the page will reload automatically in ~1 minute.';
+    api('update').then(r => { if (r && r.msg) updateDetail.textContent = r.msg + ' (page reloads automatically)'; })
                  .catch(() => { updateDetail.textContent = 'Update started (panel restarting)…'; });
+    // the installer restarts the panel; reload once it is back to show the new version
+    setTimeout(function () { location.reload(); }, 80000);
   }
 
   /* ── VPN Toggle ────────────────────────────────── */

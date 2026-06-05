@@ -83,9 +83,15 @@ case "$ACT" in
       cat > /tmp/sb-update.sh <<'UPD'
 cd /tmp && rm -rf reality-vpn-glinet-universal-main && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz && cd reality-vpn-glinet-universal-main && sh install.sh
 UPD
-      # detach from uhttpd (install restarts the panel) so the update survives
-      setsid sh /tmp/sb-update.sh </dev/null >/tmp/reality-update.log 2>&1 &
-      emit; echo "{\"ok\":true,\"msg\":\"Updating in background — refresh in ~1 min\"}"; exit 0;;
+      # detach from uhttpd (the install restarts the panel) so the update survives.
+      if command -v setsid >/dev/null 2>&1; then
+        setsid sh /tmp/sb-update.sh </dev/null >/tmp/reality-update.log 2>&1 &
+      elif command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -x /bin/sh -- /tmp/sb-update.sh
+      else
+        sh /tmp/sb-update.sh </dev/null >/tmp/reality-update.log 2>&1 &
+      fi
+      emit; echo "{\"ok\":true,\"msg\":\"Updating in background — page will reload in ~1 min\"}"; exit 0;;
   status) :;;
 esac
 # toggle reflects DESIRED state (sticky through auto-reconnect); egress/ping below
@@ -99,4 +105,7 @@ SRV="—"
 [ -n "$ACTIVE" ] && [ "$ACTIVE" != "direct" ] && [ -f "/etc/sing-box/servers/$ACTIVE.json" ] && SRV=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "/etc/sing-box/servers/$ACTIVE.json" | head -1)
 [ -z "$SRV" ] && SRV="—"
 VER=$(cat /etc/sing-box/version 2>/dev/null | tr -d ' \r\n'); [ -n "$VER" ] || VER="—"
-emit; echo "{\"auth\":true,\"vpn\":$VPN,\"killswitch\":$KS,\"mode\":\"$MODE\",\"active\":\"$ACTIVE\",\"server\":\"$SRV\",\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\",\"version\":\"$VER\"}"
+# "updated_to" set right after an install (Update button) and expires in 10 min,
+# so the panel can show a one-shot "✅ updated to vX" confirmation.
+UPDTO=""; [ -n "$(find /etc/sing-box/.updated_to -mmin -10 2>/dev/null)" ] && UPDTO=$(cat /etc/sing-box/.updated_to 2>/dev/null | tr -d ' \r\n')
+emit; echo "{\"auth\":true,\"vpn\":$VPN,\"killswitch\":$KS,\"mode\":\"$MODE\",\"active\":\"$ACTIVE\",\"server\":\"$SRV\",\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\",\"version\":\"$VER\",\"updated_to\":\"$UPDTO\"}"
