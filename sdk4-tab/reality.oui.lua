@@ -255,4 +255,42 @@ function M.speedtest(args)
     }
 end
 
+-- ---- version / self-update ----------------------------------------------
+-- Mirrors the standalone :8088 panel's checkupdate/update so the native GL tab
+-- can show the installed version and update in place from GitHub.
+local REPO = "mxt96/reality-vpn-glinet-universal"
+
+function M.check_update(args)
+    local inst = trim(sh("cat /etc/sing-box/version 2>/dev/null | tr -d ' \\r\\n'"))
+    if inst == "" then inst = "unknown" end
+    local lat = trim(sh("curl -fsSL --max-time 8 https://raw.githubusercontent.com/" ..
+        REPO .. "/main/VERSION 2>/dev/null | tr -d ' \\r\\n'", 10))
+    if lat == "" then lat = "unknown" end
+    return { installed = inst, latest = lat, update = (lat ~= "unknown" and inst ~= lat) }
+end
+
+function M.do_update(args)
+    -- Re-running the installer restarts services (incl. oui-httpd's own tree), so it
+    -- must NOT run inside this request. Detach via the router's cron — a one-shot,
+    -- lock-guarded, self-removing line — exactly like the :8088 panel's update path.
+    local script = [[#!/bin/sh
+[ -f /tmp/sb-update.running ] && exit 0
+touch /tmp/sb-update.running
+cd /tmp && rm -rf reality-vpn-glinet-universal-main \
+  && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz \
+  && cd reality-vpn-glinet-universal-main && sh install.sh
+sed -i '\#/tmp/sb-update.sh#d' /etc/crontabs/root 2>/dev/null
+/etc/init.d/cron restart 2>/dev/null
+rm -f /tmp/sb-update.running
+]]
+    local f = io.open("/tmp/sb-update.sh", "w")
+    if not f then return { ok = false, msg = "io error" } end
+    f:write(script); f:close()
+    sh("chmod +x /tmp/sb-update.sh; touch /etc/crontabs/root; " ..
+       "grep -q '/tmp/sb-update.sh' /etc/crontabs/root 2>/dev/null || " ..
+       "echo '* * * * * /bin/sh /tmp/sb-update.sh' >> /etc/crontabs/root; " ..
+       "/etc/init.d/cron enable >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1")
+    return { ok = true, msg = "Update scheduled — installs within ~1-2 min, page reloads" }
+end
+
 return M

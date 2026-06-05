@@ -38,12 +38,15 @@
         servers: [], serversLoaded: false,
         addLink: "", addName: "", addMsg: "", adding: false,
         editTag: "", editLink: "", editName: "", editMsg: "", editing: false,
-        spinning: false, spd: null, spdRunning: false
+        spinning: false, spd: null, spdRunning: false,
+        ver: { installed: "", latest: "", update: false }, verLoaded: false,
+        checking: false, updating: false, updateMsg: ""
       };
     },
     created: function () {
       this.refresh();
       this.loadServers();
+      this.checkUpdate();
       var self = this;
       this._timer = setInterval(function () { if (!self.busy) self.refresh(); }, 15000);
     },
@@ -100,9 +103,12 @@
         }).catch(function () { self.adding = false; self.addMsg = "Failed to add server"; });
       },
       delServer: function (tag) {
+        if (typeof window !== "undefined" && window.confirm &&
+            !window.confirm("Delete server " + tag + "?")) return;
         var self = this; this.busy = true;
-        call("del_server", { tag: tag }).then(function () { self.busy = false; self.loadServers(); })
-          .catch(function () { self.busy = false; self.loadServers(); });
+        call("del_server", { tag: tag }).then(function () {
+          self.busy = false; self.cancelEdit(); self.loadServers();
+        }).catch(function () { self.busy = false; self.cancelEdit(); self.loadServers(); });
       },
       startEdit: function (sv) {
         this.editTag = sv.tag;
@@ -125,6 +131,21 @@
         var self = this; this.spdRunning = true; this.spd = null;
         call("speedtest").then(function (r) { self.spdRunning = false; self.spd = r || {}; })
           .catch(function () { self.spdRunning = false; self.spd = { down: "0.0", up: "0.0" }; });
+      },
+      checkUpdate: function () {
+        var self = this; this.checking = true; this.updateMsg = "";
+        return call("check_update").then(function (r) {
+          self.checking = false; self.verLoaded = true; self.ver = r || {};
+        }).catch(function () { self.checking = false; self.verLoaded = true; });
+      },
+      doUpdate: function () {
+        var self = this; this.updating = true; this.updateMsg = "Update scheduled — installing, this page will reload…";
+        call("do_update").then(function (r) {
+          if (r && r.msg) self.updateMsg = r.msg + " — this page will reload.";
+          // the installer restarts services and this very tab; reload after ~85s to
+          // pick up the new version + confirmation.
+          setTimeout(function () { try { location.reload(); } catch (e) {} }, 85000);
+        }).catch(function () { self.updating = false; self.updateMsg = "Update failed to start"; });
       }
     },
     render: function (h) {
@@ -259,6 +280,19 @@
           h("div", { style: { display: "flex", alignItems: "center" } }, [
             h("gl-button", { attrs: { type: "primary", loading: t.spdRunning }, on: { click: function () { t.runSpeedtest(); } } }, [t._v(t.spdRunning ? "Testing…" : "Run speed test")]),
             spdLine
+          ])
+        ])]),
+
+        // VERSION / UPDATE
+        h("gl-card", [ h("div", { staticClass: "main" }, [
+          sectionTitle("Version"),
+          kv("Installed", t.ver.installed || (t.verLoaded ? "unknown" : "…")),
+          kv("Latest", t.ver.latest || (t.verLoaded ? "unknown" : "…")),
+          h("div", { staticClass: "btns", style: { marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap" } }, [
+            h("gl-button", { attrs: { loading: t.checking }, on: { click: function () { t.checkUpdate(); } } }, [t._v("Check for updates")]),
+            t.ver.update ? h("gl-button", { staticClass: "btn-item", style: { marginLeft: "8px" }, attrs: { type: "primary", loading: t.updating }, on: { click: function () { t.doUpdate(); } } }, [t._v("Update now")]) : null,
+            (t.verLoaded && !t.ver.update && t.ver.latest && t.ver.latest !== "unknown") ? h("span", { style: { marginLeft: "10px", color: "#10b981", fontSize: "13px" } }, [t._v("Up to date")]) : null,
+            t.updateMsg ? h("span", { style: { marginLeft: "10px", color: "#8a8f99", fontSize: "13px" } }, [t._v(t.updateMsg)]) : null
           ])
         ])])
       ]);

@@ -53,6 +53,9 @@ if [ "$SCHEME" != "vmess" ]; then
   MAIN=${BODY%%\?*}
   USERINFO=$(printf '%s' "$MAIN" | sed -n 's/^\([^@]*\)@.*/\1/p')
   HOSTPORT=$(printf '%s' "$MAIN" | sed 's/^[^@]*@//')
+  # drop any trailing "/path" (e.g. hysteria2://pass@host:8443/?sni=…) so the port
+  # parse below doesn't capture the slash -> "server_port": 8443/ -> invalid JSON.
+  HOSTPORT=${HOSTPORT%%/*}
   case "$HOSTPORT" in
     \[*\]:*) HOST=$(printf '%s' "$HOSTPORT" | sed -n 's/^\[\(.*\)\]:.*/\1/p'); PORT=${HOSTPORT##*:} ;;
     \[*\])   HOST=$(printf '%s' "$HOSTPORT" | sed -n 's/^\[\(.*\)\]$/\1/p'); PORT= ;;

@@ -10,4 +10,6 @@ return {
     edit_server = true,
     del_server = true,
     speedtest = true,
+    check_update = true,
+    do_update = true,
 }
