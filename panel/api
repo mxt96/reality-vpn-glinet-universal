@@ -74,6 +74,18 @@ case "$ACT" in
       DP=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\(srv-[A-Za-z0-9._-]*\).*/\1/p')
       [ -n "$DP" ] && [ -f "/etc/sing-box/servers/$DP.json" ] && { rm -f "/etc/sing-box/servers/$DP.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; }
       emit; echo '{"ok":true}'; exit 0;;
+  checkupdate)
+      INST=$(cat /etc/sing-box/version 2>/dev/null | tr -d ' \r\n'); [ -n "$INST" ] || INST=unknown
+      LAT=$(curl -fsSL --max-time 8 https://raw.githubusercontent.com/mxt96/reality-vpn-glinet-universal/main/VERSION 2>/dev/null | tr -d ' \r\n'); [ -n "$LAT" ] || LAT=unknown
+      UPD=false; [ "$LAT" != unknown ] && [ "$INST" != "$LAT" ] && UPD=true
+      emit; echo "{\"installed\":\"$INST\",\"latest\":\"$LAT\",\"update\":$UPD}"; exit 0;;
+  update)
+      cat > /tmp/sb-update.sh <<'UPD'
+cd /tmp && rm -rf reality-vpn-glinet-universal-main && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz && cd reality-vpn-glinet-universal-main && sh install.sh
+UPD
+      # detach from uhttpd (install restarts the panel) so the update survives
+      setsid sh /tmp/sb-update.sh </dev/null >/tmp/reality-update.log 2>&1 &
+      emit; echo "{\"ok\":true,\"msg\":\"Updating in background — refresh in ~1 min\"}"; exit 0;;
   status) :;;
 esac
 # toggle reflects DESIRED state (sticky through auto-reconnect); egress/ping below
@@ -86,4 +98,5 @@ G=$(cat /tmp/lk-geo 2>/dev/null); EG=$(printf '%s' "$G"|cut -d'|' -f2); CO=$(pri
 SRV="—"
 [ -n "$ACTIVE" ] && [ "$ACTIVE" != "direct" ] && [ -f "/etc/sing-box/servers/$ACTIVE.json" ] && SRV=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "/etc/sing-box/servers/$ACTIVE.json" | head -1)
 [ -z "$SRV" ] && SRV="—"
-emit; echo "{\"auth\":true,\"vpn\":$VPN,\"killswitch\":$KS,\"mode\":\"$MODE\",\"active\":\"$ACTIVE\",\"server\":\"$SRV\",\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\"}"
+VER=$(cat /etc/sing-box/version 2>/dev/null | tr -d ' \r\n'); [ -n "$VER" ] || VER="—"
+emit; echo "{\"auth\":true,\"vpn\":$VPN,\"killswitch\":$KS,\"mode\":\"$MODE\",\"active\":\"$ACTIVE\",\"server\":\"$SRV\",\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\",\"version\":\"$VER\"}"

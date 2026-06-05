@@ -138,6 +138,10 @@ cp -r "$D/servers/." "$SBDIR/servers/" 2>/dev/null || true
 # added -> re-running the installer to upgrade does NOT wipe their configured servers.
 rm -f "$SBDIR/servers/server.example.json" 2>/dev/null || true
 
+# record the installed version so the panel can show it + check for updates
+if [ -f "$D/VERSION" ]; then cp "$D/VERSION" "$SBDIR/version"; else echo "unknown" > "$SBDIR/version"; fi
+say "installed version: $(cat "$SBDIR/version" 2>/dev/null)"
+
 # ---- 6) sing-box service ---------------------------------------------------
 cat > /etc/init.d/sing-box <<'EOF'
 #!/bin/sh /etc/rc.common
