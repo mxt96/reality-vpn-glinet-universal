@@ -19,13 +19,11 @@ That link is all you paste here — your server's keys never go into this repo.
 
 ## One-command install
 
-On the router (SSH in as root):
+On the router (SSH in as root). Single line on purpose — `&&`-chained so it still
+works if your mobile SSH client strips newlines on paste:
 
 ```sh
-cd /tmp
-curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz
-cd reality-vpn-glinet-universal-main
-sh install.sh
+cd /tmp && rm -rf reality-vpn-glinet-universal-main && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz && cd reality-vpn-glinet-universal-main && sh install.sh
 ```
 
 No `curl` on the
