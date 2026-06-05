@@ -206,12 +206,20 @@ else
   say "firewall: iptables/fw3 path active (postup.sh installs FORWARD+MASQUERADE rules)."
 fi
 
-# ---- 9) cron: LAN forwarding re-apply, internet watchdog, geo cache --------
+# ---- 9) cron: LAN forwarding re-apply, supervisor + killswitch, geo cache --
+# supervisor (auto-reconnect) and killswitch re-assert every 30s. cron's finest
+# granularity is 60s, so each runs twice a minute (:00 and :30).
 CR=/etc/crontabs/root; touch "$CR"
-grep -q 'sing-box/postup.sh'   "$CR" || echo '*/2 * * * * /bin/sh /etc/sing-box/postup.sh'      >> "$CR"
-grep -q 'sing-box/watchdog.sh' "$CR" || echo '*   * * * * /bin/sh /etc/sing-box/watchdog.sh'    >> "$CR"
-grep -q 'sing-box/geo-refresh' "$CR" || echo '*/5 * * * * /bin/sh /etc/sing-box/geo-refresh.sh' >> "$CR"
-grep -q 'sing-box/ks-sync.sh'  "$CR" || echo '*   * * * * /bin/sh /etc/sing-box/ks-sync.sh'     >> "$CR"
+# drop any prior lines we own, then re-add cleanly (idempotent across upgrades)
+grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync)' "$CR" > "$CR.tmp" 2>/dev/null; mv "$CR.tmp" "$CR"
+{
+  echo '*/2 * * * * /bin/sh /etc/sing-box/postup.sh'
+  echo '*/5 * * * * /bin/sh /etc/sing-box/geo-refresh.sh'
+  echo '* * * * * /bin/sh /etc/sing-box/watchdog.sh'
+  echo '* * * * * sleep 30; /bin/sh /etc/sing-box/watchdog.sh'
+  echo '* * * * * /bin/sh /etc/sing-box/ks-sync.sh'
+  echo '* * * * * sleep 30; /bin/sh /etc/sing-box/ks-sync.sh'
+} >> "$CR"
 /etc/init.d/cron enable 2>/dev/null || true
 /etc/init.d/cron restart 2>/dev/null || true
 
