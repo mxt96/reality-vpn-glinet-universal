@@ -49,7 +49,12 @@ case "$ACT" in
   vpn_off) echo 0 > /etc/sing-box/vpn.enabled; /etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; ip rule del pref 500 >/dev/null 2>&1; ks_enforce 2>/dev/null; (sleep 3; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
   ks_on) ks_on;;
   ks_off) ks_off;;
-  proto) P=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p'); case "$P" in auto|hy2-out|reality-out|srv-*) curl -s --max-time 4 -X PUT "$API/proxies/select" -d "{\"name\":\"$P\"}" >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;; esac;;
+  proto) P=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p')
+      # Only "auto" or a real server tag are selectable outbounds. Legacy/phantom
+      # names (hy2-out, reality-out) have no matching outbound -> selecting them
+      # blackholes traffic and, with killswitch on, kills internet. Fall back to auto.
+      [ "$P" = auto ] || { [ -n "$P" ] && [ -f "/etc/sing-box/servers/$P.json" ]; } || P=auto
+      curl -s --max-time 4 -X PUT "$API/proxies/select" -d "{\"name\":\"$P\"}" >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
   setpass) NP=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
     if [ -n "$NP" ] && [ "${#NP}" -ge 6 ]; then printf 'root:%s\n' "$NP" | chpasswd >/dev/null 2>&1; emit; echo '{"ok":true,"msg":"Password changed"}'; else emit; echo '{"ok":false,"msg":"At least 6 characters"}'; fi
     exit 0;;
@@ -71,7 +76,10 @@ case "$ACT" in
       L=""; for f in /etc/sing-box/servers/*.json; do [ -f "$f" ] || continue; t=$(basename "$f" .json); ty=$(sed -n 's/.*"type": *"\([a-z0-9]*\)".*/\1/p' "$f"|head -1); sv=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "$f"|head -1); L="$L,{\"tag\":\"$t\",\"type\":\"$ty\",\"server\":\"$sv\"}"; done
       emit; echo "{\"servers\":[${L#,}]}"; exit 0;;
   delserver)
-      DP=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\(srv-[A-Za-z0-9._-]*\).*/\1/p')
+      # Accept ANY safe tag (not only srv-*). Legacy servers added by older add-server.sh
+      # have no srv- prefix (e.g. VPS-HY2) and were previously undeletable. The [ -f ]
+      # guard + charset (no slash) keep this safe from traversal.
+      DP=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p')
       [ -n "$DP" ] && [ -f "/etc/sing-box/servers/$DP.json" ] && { rm -f "/etc/sing-box/servers/$DP.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; }
       emit; echo '{"ok":true}'; exit 0;;
   checkupdate)

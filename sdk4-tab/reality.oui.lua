@@ -96,8 +96,17 @@ end
 -- ---- protocol selector --------------------------------------------------
 function M.set_proto(args)
     local p = args and args.proto or ""
-    if not (p == "auto" or p == "hy2-out" or p == "reality-out" or p:match("^srv%-[%w._%-]+$")) then
-        return { ok = false, msg = "bad proto" }
+    -- Only "auto" or a real server tag map to an existing outbound. Legacy/phantom
+    -- names (hy2-out, reality-out) have NO matching outbound in the universal config,
+    -- so selecting them blackholes traffic and, with killswitch on, kills internet.
+    -- Validate against the live servers dir; fall back to "auto" so we never select
+    -- a non-existent node.
+    if p ~= "auto" then
+        if not p:match("^[%w][%w._%-]*$") then
+            p = "auto"
+        elseif trim(sh("[ -f /etc/sing-box/servers/" .. p .. ".json ] && echo y || echo n")) ~= "y" then
+            p = "auto"
+        end
     end
     sh("curl -s --max-time 4 -X PUT " .. CLASH .. "/proxies/select -d '{\"name\":\"" .. p ..
         "\"}' >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
@@ -182,7 +191,7 @@ end
 
 function M.del_server(args)
     local tag = args and args.tag or ""
-    if not tag:match("^srv%-[%w._%-]+$") then return { ok = false, msg = "bad tag" } end
+    if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end
     -- If deleting the currently-selected server, fall back to "auto" first so the
     -- tunnel keeps running on the base outbounds instead of breaking. (mason: safe
     -- delete of the active config.)
@@ -203,7 +212,7 @@ function M.edit_server(args)
     local tag     = args and args.tag or ""
     local link    = args and args.link or ""
     local newname = args and args.name or ""
-    if not tag:match("^srv%-[%w._%-]+$") then return { ok = false, msg = "bad tag" } end
+    if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end
     if link == "" then return { ok = false, msg = "Empty link" } end
 
     local oldfile = SERVERS .. "/" .. tag .. ".json"
