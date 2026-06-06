@@ -84,10 +84,16 @@ end
 -- treats ANY error reply as a dead session and bounces the admin to /#/login.
 -- pcall-guard + always return a valid (possibly degraded) status table instead.
 function M.get_status(args)
+    -- The toggle + killswitch are cheap, reliable flag reads — compute them up front
+    -- so that even if the richer status (clash/geo/active-server) throws, the UI still
+    -- reflects the REAL desired state instead of falsely showing everything OFF (this
+    -- was the GL-tab "all off / all —" desync vs the :8088 panel showing ON).
+    local vpn = trim(sh("[ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = \"1\" ] && echo true || echo false"))
+    local ks  = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_desired && echo true || echo false"))
     local ok, res = pcall(compute_status, args)
     if ok and type(res) == "table" then return res end
     return {
-        running = false, killswitch = false, mode = "", active = "",
+        running = (vpn == "true"), killswitch = (ks == "true"), mode = "", active = "",
         egress = "", country = "", city = "", ping = "",
         server = "", protocol = ""
     }
