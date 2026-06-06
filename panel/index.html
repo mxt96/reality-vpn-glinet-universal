@@ -1445,12 +1445,12 @@
         <textarea
           id="as-link"
           class="modal-textarea"
-          placeholder="vless://… or hysteria2://…"
+          placeholder="One link, OR many (one per line), OR a subscription URL / base64"
           autocomplete="off"
           autocorrect="off"
           autocapitalize="off"
           spellcheck="false"
-          rows="3"
+          rows="4"
         ></textarea>
       </div>
     </div>
@@ -2059,18 +2059,36 @@
 
   function doAddServer() {
     const name = asName.value.trim();
-    const link = asLink.value.trim();
+    const raw  = asLink.value.trim();
     asError.textContent = '';
+    if (!raw) { asError.textContent = 'Paste a link, a list, or a subscription'; return; }
 
-    if (!name) { asError.textContent = 'Enter a name'; return; }
-    if (!link)  { asError.textContent = 'Paste a config link'; return; }
-    if (!link.startsWith('vless://') && !link.startsWith('hysteria2://')) {
-      asError.textContent = 'Link must start with vless:// or hysteria2://';
+    // Bulk import (Shadowrocket-style) when the input is multi-line, an http(s)
+    // subscription URL, or a base64 blob (single line with no scheme). One link
+    // with a scheme -> the normal single add (keeps its friendly error messages).
+    const lines  = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const isSub  = /^https?:\/\//i.test(raw);
+    const isBulk = lines.length > 1 || isSub || (lines.length === 1 && !raw.includes('://'));
+
+    asSave.disabled = true;
+    if (isBulk) {
+      api('importservers', { method: 'POST', body: raw })
+        .then(data => {
+          asSave.disabled = false;
+          if (data && data.ok && data.added > 0) {
+            closeAddServerModal();
+            fetchUserServers();
+          } else {
+            asError.textContent = (data && data.added === 0)
+              ? 'No valid configs found in the list'
+              : (data && data.msg) || 'Import failed';
+          }
+        })
+        .catch(() => { asError.textContent = 'No connection to the router'; asSave.disabled = false; });
       return;
     }
 
-    asSave.disabled = true;
-    api('addserver', { method: 'POST', query: 'name=' + encodeURIComponent(name), body: link })
+    api('addserver', { method: 'POST', query: 'name=' + encodeURIComponent(name), body: raw })
       .then(data => {
         if (data.ok) {
           closeAddServerModal();

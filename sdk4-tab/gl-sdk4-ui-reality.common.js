@@ -93,10 +93,25 @@
         }).catch(function () { self.busy = false; self.refresh(); });
       },
       addServer: function () {
-        var self = this; var link = (this.addLink || "").trim();
-        if (!link) { this.addMsg = "Paste a vless:// or hysteria2:// link"; return; }
+        var self = this; var raw = (this.addLink || "").trim();
+        if (!raw) { this.addMsg = "Paste a link, a list, or a subscription"; return; }
+        // Bulk import (Shadowrocket-style): multi-line list, an http(s) subscription
+        // URL, or a base64 blob -> import_links. A single scheme link -> normal add.
+        var lines = raw.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+        var isBulk = lines.length > 1 || /^https?:\/\//i.test(raw) || (lines.length === 1 && raw.indexOf("://") < 0);
         this.adding = true; this.addMsg = "";
-        call("add_server", { link: link, name: (this.addName || "").trim() }).then(function (r) {
+        if (isBulk) {
+          call("import_links", { text: raw }).then(function (r) {
+            self.adding = false;
+            if (r && r.ok && r.added > 0) {
+              self.addLink = ""; self.addName = "";
+              self.addMsg = "Added " + r.added + (r.failed ? (", skipped " + r.failed) : "");
+              self.loadServers();
+            } else { self.addMsg = (r && r.added === 0) ? "No valid configs found" : ((r && r.msg) ? r.msg : "Import failed"); }
+          }).catch(function () { self.adding = false; self.addMsg = "Import failed"; });
+          return;
+        }
+        call("add_server", { link: raw, name: (this.addName || "").trim() }).then(function (r) {
           self.adding = false;
           if (r && r.ok) { self.addLink = ""; self.addName = ""; self.addMsg = ""; self.loadServers(); }
           else { self.addMsg = (r && r.msg) ? r.msg : "Failed to add server"; }
@@ -227,7 +242,7 @@
       });
 
       var addBox = h("div", { style: { marginTop: "12px" } }, [
-        h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.addLink, placeholder: "vless://…  or  hysteria2://…", size: "small", clearable: true }, on: { input: function (v) { t.addLink = v; } } }),
+        h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.addLink, type: "textarea", rows: 4, placeholder: "One link, OR many (one per line), OR a subscription URL / base64", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
         h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.addName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.addName = v; } } }),
         h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.adding }, on: { click: function () { t.addServer(); } } }, [t._v("Add server")]),
         t.addMsg ? h("span", { style: { marginLeft: "10px", color: "#e5534b", fontSize: "13px" } }, [t._v(t.addMsg)]) : null

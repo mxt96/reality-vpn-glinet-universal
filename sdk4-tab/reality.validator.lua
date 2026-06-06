@@ -7,6 +7,7 @@ return {
     set_killswitch = true,
     list_servers = true,
     add_server = true,
+    import_links = true,
     edit_server = true,
     del_server = true,
     speedtest = true,

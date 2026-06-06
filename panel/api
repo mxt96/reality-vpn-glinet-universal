@@ -72,6 +72,14 @@ case "$ACT" in
       R=$(/etc/sing-box/rebuild.sh 2>/dev/null | head -1)
       if [ "$R" = "OK" ]; then emit; echo "{\"ok\":true,\"tag\":\"$TAG\"}"; else rm -f "/etc/sing-box/servers/$TAG.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; emit; echo '{"ok":false,"msg":"Server config rejected"}'; fi
       exit 0;;
+  importservers)
+      # Bulk import (Shadowrocket-style): POST body = many share-links (one per line),
+      # a base64 subscription blob, or an http(s):// subscription URL. import-links.sh
+      # parses each + rebuilds once, prints {"ok":..,"added":N,"failed":M,"tags":[...]}.
+      BODY=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
+      OUT=$(printf '%s' "$BODY" | /etc/sing-box/import-links.sh 2>/dev/null)
+      (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null
+      emit; printf '%s\n' "${OUT:-{\"ok\":false,\"msg\":\"import failed\"}}"; exit 0;;
   listservers)
       L=""; for f in /etc/sing-box/servers/*.json; do [ -f "$f" ] || continue; t=$(basename "$f" .json); ty=$(sed -n 's/.*"type": *"\([a-z0-9]*\)".*/\1/p' "$f"|head -1); sv=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "$f"|head -1); L="$L,{\"tag\":\"$t\",\"type\":\"$ty\",\"server\":\"$sv\"}"; done
       emit; echo "{\"servers\":[${L#,}]}"; exit 0;;

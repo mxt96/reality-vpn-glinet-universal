@@ -128,7 +128,7 @@ done
 
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
-         add-server.sh list-servers.sh del-server.sh; do
+         add-server.sh list-servers.sh del-server.sh import-links.sh; do
   cp "$D/$s" "$SBDIR/$s" && chmod +x "$SBDIR/$s"
 done
 # ship empty servers dir + the README/example for reference

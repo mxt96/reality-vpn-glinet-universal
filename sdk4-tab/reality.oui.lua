@@ -195,6 +195,22 @@ function M.add_server(args)
     end
 end
 
+-- Bulk import (Shadowrocket-style): args.text may be many share-links (one per
+-- line), a base64 subscription blob, or an http(s):// subscription URL. Each link
+-- is parsed + written and the config is rebuilt ONCE. Returns {ok,added,failed,tags}.
+function M.import_links(args)
+    local text = args and args.text or ""
+    if text == "" then return { ok = false, msg = "Empty input" } end
+    local tf = io.open("/tmp/reality-import", "w")
+    if not tf then return { ok = false, msg = "io error" } end
+    tf:write(text); tf:close()
+    local out = trim(sh("/etc/sing-box/import-links.sh < /tmp/reality-import 2>/dev/null", 60))
+    sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
+    local ok, res = pcall(cjson.decode, out)
+    if ok and type(res) == "table" then return res end
+    return { ok = false, msg = "import failed" }
+end
+
 function M.del_server(args)
     local tag = args and args.tag or ""
     if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end
