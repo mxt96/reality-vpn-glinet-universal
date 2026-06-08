@@ -14,7 +14,7 @@ LAN=$(ip -4 route show dev br-lan scope link 2>/dev/null | awk 'NR==1{print $1}'
 # to liveness, no regression).
 tunnel_ok(){
   command -v curl >/dev/null 2>&1 || return 0
-  curl -s --max-time 7 --interface singtun0 -o /dev/null http://1.1.1.1 2>/dev/null
+  for _t in 1 2 3; do curl -s --max-time 5 --interface singtun0 -o /dev/null http://1.1.1.1 2>/dev/null && return 0; sleep 1; done; return 1
 }
 
 if ip link show singtun0 >/dev/null 2>&1 && pidof sing-box >/dev/null 2>&1 && tunnel_ok; then

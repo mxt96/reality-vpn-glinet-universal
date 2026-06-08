@@ -31,7 +31,7 @@ internet(){ ping -c1 -W3 1.1.1.1 >/dev/null 2>&1 || ping -c1 -W3 8.8.8.8 >/dev/n
 # don't use ping here.) No curl -> skip probe, fall back to liveness (no regression).
 tunnel_ok(){
   command -v curl >/dev/null 2>&1 || return 0
-  curl -s --max-time 7 --interface singtun0 -o /dev/null http://1.1.1.1 2>/dev/null
+  for _t in 1 2 3; do curl -s --max-time 5 --interface singtun0 -o /dev/null http://1.1.1.1 2>/dev/null && return 0; sleep 1; done; return 1
 }
 stop_sb(){ /etc/init.d/sing-box stop 2>/dev/null; killall sing-box 2>/dev/null; ip rule del pref 500 2>/dev/null; }
 
