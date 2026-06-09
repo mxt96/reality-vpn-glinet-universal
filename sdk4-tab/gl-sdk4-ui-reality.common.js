@@ -39,6 +39,7 @@
         addLink: "", addName: "", addMsg: "", adding: false,
         editTag: "", editLink: "", editName: "", editMsg: "", editing: false,
         spinning: false, spd: null, spdRunning: false,
+        traf: { upS: 0, downS: 0, up: 0, down: 0, conns: 0, ok: false },
         ver: { installed: "", latest: "", update: false }, verLoaded: false,
         checking: false, updating: false, updateMsg: ""
       };
@@ -49,8 +50,13 @@
       this.checkUpdate();
       var self = this;
       this._timer = setInterval(function () { if (!self.busy) self.refresh(); }, 15000);
+      // live traffic: poll fast (every 2s) so the user can SEE data flowing through
+      // the tunnel = proof the connection is real. Cheap single clash call.
+      this._trafPrev = null;
+      this._trafTimer = setInterval(function () { self.pollTraffic(); }, 2000);
+      this.pollTraffic();
     },
-    beforeDestroy: function () { if (this._timer) clearInterval(this._timer); },
+    beforeDestroy: function () { if (this._timer) clearInterval(this._timer); if (this._trafTimer) clearInterval(this._trafTimer); },
     methods: {
       refresh: function () {
         var self = this;
@@ -141,6 +147,28 @@
           if (r && r.ok) { self.cancelEdit(); self.loadServers(); }
           else { self.editMsg = (r && r.msg) ? r.msg : "Failed to save"; }
         }).catch(function () { self.editing = false; self.editMsg = "Failed to save"; });
+      },
+      fmtBytes: function (n) {
+        n = Number(n) || 0; if (n < 0) n = 0;
+        var u = ["B", "KB", "MB", "GB", "TB"], i = 0;
+        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+        return (i === 0 ? Math.round(n) : n.toFixed(n < 10 ? 1 : 0)) + " " + u[i];
+      },
+      pollTraffic: function () {
+        var self = this;
+        if (!this.vpnOn) { this.traf.ok = false; this._trafPrev = null; this.traf.upS = 0; this.traf.downS = 0; return; }
+        call("get_traffic").then(function (r) {
+          if (!r) return;
+          var now = (Date.now ? Date.now() : new Date().getTime());
+          var p = self._trafPrev;
+          if (p && now > p.t) {
+            var dt = (now - p.t) / 1000;
+            self.traf.upS = Math.max(0, (r.up_total - p.up) / dt);
+            self.traf.downS = Math.max(0, (r.down_total - p.down) / dt);
+          }
+          self.traf.up = r.up_total; self.traf.down = r.down_total; self.traf.conns = r.conns || 0; self.traf.ok = true;
+          self._trafPrev = { t: now, up: r.up_total, down: r.down_total };
+        }).catch(function () {});
       },
       runSpeedtest: function () {
         var self = this; this.spdRunning = true; this.spd = null;
@@ -268,6 +296,18 @@
             kv("Server", s.server),
             kv("Protocol", s.protocol)
           ]),
+          // LIVE TRAFFIC — moving ↓/↑ numbers = proof data is really flowing through the tunnel
+          (t.vpnOn ? h("div", { style: { marginTop: "12px", padding: "12px", background: (t.traf.ok ? "rgba(16,185,129,0.08)" : "rgba(0,0,0,0.04)"), borderRadius: "10px" } }, [
+            h("div", { style: { fontSize: "12px", color: "#8a8f99", marginBottom: "6px" } }, [t._v("Live traffic" + (t.traf.conns ? (" · " + t.traf.conns + " active") : ""))]),
+            h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: "18px", fontWeight: "700" } }, [
+              h("span", { style: { color: "#10b981" } }, [t._v("↓ " + t.fmtBytes(t.traf.downS) + "/s")]),
+              h("span", { style: { color: "#3b82f6" } }, [t._v("↑ " + t.fmtBytes(t.traf.upS) + "/s")])
+            ]),
+            h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#8a8f99", marginTop: "6px" } }, [
+              h("span", [t._v("Total ↓ " + t.fmtBytes(t.traf.down))]),
+              h("span", [t._v("↑ " + t.fmtBytes(t.traf.up))])
+            ])
+          ]) : null),
           toggleRow("VPN", t.tunneled ? "Tunnel active" : (t.vpnOn ? "Running — no server (direct)" : "Tunnel stopped"), t.vpnOn, function (v) { t.toggleVpn(v); }),
           toggleRow("Kill switch", "Block LAN if the tunnel drops", t.ksOn, function (v) { t.toggleKs(v); }),
           h("div", { staticClass: "btns", style: { marginTop: "14px" } }, [

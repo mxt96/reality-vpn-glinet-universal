@@ -31,72 +31,80 @@ local function sh(cmd, timeout)
 end
 
 local function now_of(sel)
-    return trim(sh("curl -s --max-time 3 " .. CLASH .. "/proxies/" .. sel ..
-        " 2>/dev/null | sed -n 's/.*\"now\": *\"\\([A-Za-z0-9._-]*\\)\".*/\\1/p'"))
+    -- Fetch raw JSON and parse in Lua. Do NOT pipe through sed: under oui-httpd's
+    -- ngx.pipe.spawn a shell pipeline (`curl | sed`) returns EMPTY (only a single
+    -- command's stdout is captured reliably), which silently blanked mode/active/
+    -- egress/server in get_status -> the panel showed "—" + a false "no server
+    -- selected" banner even while the tunnel was actually up. Same single-command
+    -- pattern as get_traffic, which works.
+    local out = sh("curl -s --max-time 3 " .. CLASH .. "/proxies/" .. sel .. " 2>/dev/null")
+    return trim(out:match('"now"%s*:%s*"([A-Za-z0-9._%-]+)"') or "")
 end
 
 -- ---- status -------------------------------------------------------------
-local function compute_status(args)
-    -- toggle reflects DESIRED state (sticky through auto-reconnect); the live tunnel
-    -- is conveyed by `active`/egress below. KS reflects user intent.
-    local vpn = trim(sh("[ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = \"1\" ] && echo true || echo false"))
-    local ks  = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_desired && echo true || echo false"))
-    local mode = now_of("select")
-    local active = mode
-    if mode == "auto" then active = now_of("auto") end
-
-    local g = trim(sh("cat /tmp/lk-geo 2>/dev/null"))
+-- Pure parser (NO yields/shell here) — safe to run inside pcall. Takes the raw
+-- strings already read by the caller and turns them into the status table.
+local function parse_status(vpn, ks, sel, active, geo, srvjson)
     local parts = {}
-    for f in (g .. "|"):gmatch("([^|]*)|") do parts[#parts + 1] = f end
+    for f in ((geo or "") .. "|"):gmatch("([^|]*)|") do parts[#parts + 1] = f end
     local egress, country, city, ping = parts[2] or "", parts[3] or "", parts[4] or "", parts[5] or ""
-    if g == "" then sh("(/etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1") end
-
-    -- Derive server + protocol from the ACTUALLY active outbound (no hardcoding),
-    -- so the status matches whatever protocol the selector is using right now.
     local server, protocol = "", ""
-    if active ~= "" and active ~= "direct" then
-        local sf = io.open(SERVERS .. "/" .. active .. ".json", "r")
-        if sf then
-            local c = sf:read("*a"); sf:close()
-            server = c:match('"server":%s*"([^"]*)"') or ""
-            local ty = c:match('"type":%s*"([^"]*)"') or ""
-            if ty == "vless" then protocol = "VLESS + Reality"
-            elseif ty == "hysteria2" then protocol = "Hysteria2"
-            elseif ty ~= "" then protocol = ty end
-        end
+    if srvjson and srvjson ~= "" then
+        server = srvjson:match('"server":%s*"([^"]*)"') or ""
+        local ty = srvjson:match('"type":%s*"([^"]*)"') or ""
+        if ty == "vless" then protocol = "VLESS + Reality"
+        elseif ty == "hysteria2" then protocol = "Hysteria2"
+        elseif ty ~= "" then protocol = ty end
     end
-
     return {
-        running = (vpn == "true"),
-        killswitch = (ks == "true"),
-        mode = mode,
-        active = active,
-        egress = egress,
-        country = country,
-        city = city,
-        ping = ping,
-        server = server,
-        protocol = protocol
+        running = (vpn == "true"), killswitch = (ks == "true"),
+        mode = sel, active = active,
+        egress = egress, country = country, city = city, ping = ping,
+        server = server, protocol = protocol
     }
 end
 
 -- Never let a runtime error escape get_status: the SPA's global RPC interceptor
 -- treats ANY error reply as a dead session and bounces the admin to /#/login.
--- pcall-guard + always return a valid (possibly degraded) status table instead.
+-- CRITICAL: do ALL shell reads (sh() -> ngx.pipe YIELDS to the event loop) BEFORE
+-- the pcall. You cannot yield across a pcall/C-call boundary in LuaJIT — doing the
+-- yielding reads inside pcall raised "attempt to yield across C-call boundary",
+-- pcall caught it, and get_status silently returned the blank fallback => the panel
+-- showed "—" everywhere + a false "no server selected" banner even with the tunnel
+-- UP. So: yielding reads here, pure parsing under pcall.
 function M.get_status(args)
-    -- The toggle + killswitch are cheap, reliable flag reads — compute them up front
-    -- so that even if the richer status (clash/geo/active-server) throws, the UI still
-    -- reflects the REAL desired state instead of falsely showing everything OFF (this
-    -- was the GL-tab "all off / all —" desync vs the :8088 panel showing ON).
     local vpn = trim(sh("[ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = \"1\" ] && echo true || echo false"))
     local ks  = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_desired && echo true || echo false"))
-    local ok, res = pcall(compute_status, args)
+    local sel = now_of("select")
+    local active = sel
+    if sel == "auto" then active = now_of("auto") end
+    local geo = trim(sh("cat /tmp/lk-geo 2>/dev/null"))
+    if geo == "" then sh("(/etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1") end
+    local srvjson = ""
+    if active ~= "" and active ~= "direct" then
+        srvjson = trim(sh("cat " .. SERVERS .. "/" .. active .. ".json 2>/dev/null"))
+    end
+    local ok, res = pcall(parse_status, vpn, ks, sel, active, geo, srvjson)
     if ok and type(res) == "table" then return res end
     return {
         running = (vpn == "true"), killswitch = (ks == "true"), mode = "", active = "",
         egress = "", country = "", city = "", ping = "",
         server = "", protocol = ""
     }
+end
+
+-- ---- live traffic -------------------------------------------------------
+-- One cheap clash call so the UI can poll every couple seconds and SHOW that
+-- data is actually flowing through the tunnel (= the connection is real/alive),
+-- plus cumulative totals since sing-box started. up_total/down_total are bytes;
+-- the UI derives live speed from the delta between polls.
+function M.get_traffic(args)
+    local out = trim(sh("curl -s --max-time 3 " .. CLASH .. "/connections 2>/dev/null"))
+    local up = tonumber(out:match('"uploadTotal"%s*:%s*(%-?%d+)')) or 0
+    local down = tonumber(out:match('"downloadTotal"%s*:%s*(%-?%d+)')) or 0
+    local conns = 0
+    for _ in out:gmatch('"id"%s*:') do conns = conns + 1 end
+    return { up_total = up, down_total = down, conns = conns }
 end
 
 -- ---- protocol selector --------------------------------------------------

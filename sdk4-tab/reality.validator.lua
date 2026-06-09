@@ -2,6 +2,7 @@
 -- `true` per method => skip the default char-class validation (share-links contain ?&=@# etc.).
 return {
     get_status = true,
+    get_traffic = true,
     set_proto = true,
     set_enabled = true,
     set_killswitch = true,
