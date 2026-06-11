@@ -23,6 +23,17 @@ if ip link show singtun0 >/dev/null 2>&1 && pidof sing-box >/dev/null 2>&1 && tu
   ip rule show 2>/dev/null | grep -q "from $LAN lookup 2022" || ip rule add from "$LAN" lookup 2022 pref 500 2>/dev/null
   iptables -C FORWARD -i br-lan -o singtun0 -j ACCEPT 2>/dev/null || iptables -I FORWARD -i br-lan -o singtun0 -j ACCEPT
   iptables -t nat -C POSTROUTING -o singtun0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -o singtun0 -j MASQUERADE
+  # fw4/nftables routers: the iptables rules above land in the legacy ip filter/nat tables
+  # that the `inet fw4` ruleset IGNORES, so LAN clients still get dropped by fw4's
+  # `policy drop` on the forward hook. The install-time hotplug hook adds the fw4 rules but
+  # only re-fires on firewall RELOAD events — if fw4 flushes them without a following reload,
+  # nothing restores them and LAN clients get "VPN on, Wi-Fi connected, but no internet".
+  # Re-assert them here (every 2 min) so the cron self-heals the fw4 path too. Idempotent.
+  if nft list table inet fw4 >/dev/null 2>&1; then
+    nft -a list chain inet fw4 forward 2>/dev/null | grep -q 'oifname "singtun0" accept' || nft insert rule inet fw4 forward oifname singtun0 accept 2>/dev/null
+    nft -a list chain inet fw4 forward 2>/dev/null | grep -q 'iifname "singtun0" accept'  || nft insert rule inet fw4 forward iifname singtun0 accept 2>/dev/null
+    nft -a list chain inet fw4 srcnat  2>/dev/null | grep -q 'oifname "singtun0" masquerade' || nft add rule inet fw4 srcnat oifname singtun0 masquerade 2>/dev/null
+  fi
 else
   # tunnel DOWN or up-but-dead -> if killswitch is OFF, FAIL-OPEN: drop the policy rule so
   # LAN uses the main table (normal internet). If killswitch is ON, ks-sync enforces the block.
