@@ -105,8 +105,17 @@ mkdir -p "$SBDIR/servers"
 # (static) asset. So prefer `${ASSET}-musl`, fall back to the plain `${ASSET}`
 # (mips/armv7 have no -musl suffix and the plain build is already musl-static).
 # Verify each candidate is an ELF of the right arch AND that it actually RUNS.
+# Only arm64/amd64 ship a separate `-musl` (static) asset; the default there is
+# glibc-dynamic and won't run on OpenWrt's musl, so try `-musl` first for them.
+# mips/mipsle/armv7 have NO `-musl` suffix (the plain build is already musl-static),
+# so trying `-musl` there just 404s — try plain only. (PLAIN = the empty suffix.)
+case "$ASSET" in
+  linux-arm64|linux-amd64) SUFFIXES="-musl PLAIN" ;;
+  *)                       SUFFIXES="PLAIN" ;;
+esac
 VOUT=""
-for SUF in "-musl" ""; do
+for SUF in $SUFFIXES; do
+  [ "$SUF" = PLAIN ] && SUF=""
   URL="https://github.com/SagerNet/sing-box/releases/download/${TAG}/sing-box-${VER}-${ASSET}${SUF}.tar.gz"
   say "trying sing-box $TAG (${ASSET}${SUF})"
   TMP=$(mktemp -d "$SDHOME/sbdl.XXXXXX") || continue
