@@ -70,6 +70,17 @@ TAG=$(curl -4 -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/late
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$TAG" ] || die "could not fetch latest sing-box release tag (no internet / GitHub blocked)."
 VER=${TAG#v}
+# Re-run / upgrade friendliness: if sing-box is already installed and RUNS, reuse it
+# and SKIP the ~85MB download+unpack. On tiny routers (E750 has ~28MB free after the
+# first install) the space check below would otherwise abort a re-run -> the UI/panel
+# never get installed. To force a fresh sing-box: rm "$SBDIR/sing-box" then re-run.
+VOUT=""
+EXIST=$("$SBDIR/sing-box" version 2>/dev/null | head -1)
+if [ -n "$EXIST" ]; then
+  VOUT="$EXIST"; mkdir -p "$SBDIR/servers"
+  say "sing-box already installed ($EXIST) -> reusing, skipping download"
+fi
+if [ -z "$VOUT" ]; then
 # download (~20MB tarball) + extracted sing-box (~60MB) need a roomy dir. /tmp is
 # tmpfs (RAM) and too small on tiny routers (E750/AR300M) -> "No space left". Pick a
 # writable mount with >=85MB free (microSD/USB/overlay); die clearly if none.
@@ -124,6 +135,7 @@ for SUF in "-musl" ""; do
   if [ -n "$VOUT" ]; then say "installed: $VOUT (asset ${ASSET}${SUF})"; break; fi
   say "  ${ASSET}${SUF} downloaded but did not run on this libc -> trying next variant"
 done
+fi
 [ -n "$VOUT" ] || die "sing-box did not run (no musl/static build matched arch '$ASSET'). Tell me the router model."
 
 # ---- 5) scripts ------------------------------------------------------------
@@ -218,7 +230,7 @@ fi
 # granularity is 60s, so each runs twice a minute (:00 and :30).
 CR=/etc/crontabs/root; touch "$CR"
 # drop any prior lines we own, then re-add cleanly (idempotent across upgrades)
-grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync)' "$CR" > "$CR.tmp" 2>/dev/null; mv "$CR.tmp" "$CR"
+grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync)' "$CR" > "$CR.tmp" 2>/dev/null || true; mv "$CR.tmp" "$CR"
 {
   echo '*/2 * * * * /bin/sh /etc/sing-box/postup.sh'
   echo '*/5 * * * * /bin/sh /etc/sing-box/geo-refresh.sh'
