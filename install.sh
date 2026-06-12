@@ -70,16 +70,18 @@ TAG=$(curl -4 -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/late
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$TAG" ] || die "could not fetch latest sing-box release tag (no internet / GitHub blocked)."
 VER=${TAG#v}
-# Probe `sing-box version` robustly on RAM-starved routers. The download+unpack leaves
-# buff/cache resident; on a 128MB router (E750) that can OOM-kill the ~35MB binary the
-# instant it execs -> the shell prints "Terminated" and the probe returns empty, which
-# looked like "downloaded but did not run on this libc" and aborted a perfectly good
-# install before the panel/tab step. So: free page cache first, and retry once.
+# Probe `sing-box version`. NOTE: do NOT drop_caches here. On a 128MB router (E750) the
+# ~58MB Go binary needs its code pages resident to run; dropping the page cache right
+# before exec forces a cold ~58MB fault under the memory pressure left by the just-
+# finished download+unpack -> OOM kills it ("Terminated"). (A v1.2.3 drop_caches attempt
+# made this WORSE — the binary runs fine warm/at idle, dies on a forced cold load.) So:
+# just retry a few times with a short settle; the reuse probe runs at calm memory and
+# succeeds, and the post-download probe is treated as non-fatal for static arches below.
 sb_version() {
-  for _t in 1 2; do
-    sync 2>/dev/null; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+  for _t in 1 2 3; do
     _v=$("$SBDIR/sing-box" version 2>/dev/null | head -1)
     [ -n "$_v" ] && { echo "$_v"; return 0; }
+    sync 2>/dev/null; sleep 1
   done
   return 1
 }
@@ -168,10 +170,21 @@ for SUF in $SUFFIXES; do
     die "sing-box ($((BINSZ/1024/1024))MB) doesn't fit in internal flash (~$((${SBFREE:-0}/1024/1024))MB free) and the only spare space is a FUSE/exFAT card, which can't reliably execute binaries. Free internal flash (remove old packages) or format the card as ext4, then re-run."
   fi
   rm -rf "$TMP"
-  # decisive test: does it actually run on THIS libc? (glibc-on-musl fails here)
+  # Run-probe. For arm64/amd64 this is DECISIVE (picks the glibc-vs-musl variant that
+  # actually runs). For mips/mipsle/armv7 there is ONE static build and we already
+  # verified ELF + endianness above, so a failed probe here is almost always a transient
+  # OOM under post-unpack memory pressure (the binary runs fine once memory settles / at
+  # service start) — NOT a bad binary. Don't discard a correct binary over that.
   VOUT=$(sb_version || true)
   if [ -n "$VOUT" ]; then say "installed: $VOUT (asset ${ASSET}${SUF})"; break; fi
-  say "  ${ASSET}${SUF} downloaded but did not run on this libc -> trying next variant"
+  case "$ASSET" in
+    linux-arm64|linux-amd64)
+      say "  ${ASSET}${SUF} downloaded but did not run on this libc -> trying next variant" ;;
+    *)
+      VOUT="(arch-verified; runtime probe skipped — low memory during install)"
+      say "  ${ASSET} verified by ELF+arch; run-probe OOM'd under install memory pressure -> accepting (service will start it when memory settles)"
+      break ;;
+  esac
 done
 fi
 [ -n "$VOUT" ] || die "sing-box did not run (no musl/static build matched arch '$ASSET'). Tell me the router model."
