@@ -88,7 +88,7 @@ sb_version() {
 # first install) the space check below would otherwise abort a re-run -> the UI/panel
 # never get installed. To force a fresh sing-box: rm "$SBDIR/sing-box" then re-run.
 VOUT=""
-EXIST=$(sb_version)
+EXIST=$(sb_version || true)
 if [ -n "$EXIST" ]; then
   VOUT="$EXIST"; mkdir -p "$SBDIR/servers"
   say "sing-box already installed ($EXIST) -> reusing, skipping download"
@@ -140,20 +140,36 @@ for SUF in $SUFFIXES; do
   head -c 4 "$BIN" 2>/dev/null | grep -q ELF || { rm -rf "$TMP"; continue; }
   SIG=$(file -b "$BIN" 2>/dev/null || true)
   if [ -n "$SIG" ] && ! echo "$SIG" | grep -Eq "$EXPECT"; then rm -rf "$TMP"; continue; fi
-  # flash-aware install: /usr/bin if room, else microSD with a PATH symlink
-  BINSZ=$(wc -c < "$BIN"); FREE=$(df -k /usr/bin 2>/dev/null | awk 'NR==2{print $4*1024}'); NEED=$((BINSZ + 2*1024*1024))
-  if [ -n "$FREE" ] && [ "$FREE" -lt "$NEED" ]; then
+  # The executable MUST live on a kernel filesystem. Exec from a FUSE/exFAT/vfat
+  # removable card is UNRELIABLE: code pages re-faulted from a FUSE backend get the
+  # process killed ("Terminated") — especially after a cache drop — even with plenty
+  # of free RAM. (This bit a GL-E750 hard: 58MB binary on an exFAT card ran once warm
+  # but died on every cold exec.) So install to internal flash ($SBDIR, on the overlay)
+  # whenever it fits; only fall back to the work dir if THAT dir is a real, exec-safe fs.
+  BINSZ=$(wc -c < "$BIN"); NEED=$((BINSZ + 1024*1024))
+  SBFREE=$(df -k "$SBDIR" 2>/dev/null | awk 'NR==2{print $4*1024}')
+  fs_is_exec_safe() {   # false (1) if $1's mount is a FUSE/exFAT/vfat/ntfs card
+    _mp=$(df "$1" 2>/dev/null | awk 'NR==2{print $NF}')
+    _ty=$(awk -v m="$_mp" '$2==m{t=$3} END{print t}' /proc/mounts 2>/dev/null)
+    case "$_ty" in fuseblk|fuse.*|exfat|vfat|msdos|ntfs*) return 1 ;; *) return 0 ;; esac
+  }
+  if [ -n "$SBFREE" ] && [ "$SBFREE" -ge "$NEED" ]; then
+    mv "$BIN" "$SBDIR/sing-box" && chmod +x "$SBDIR/sing-box"
+    ln -sf "$SBDIR/sing-box" /usr/bin/sing-box 2>/dev/null || true
+    say "installed binary to internal flash ($SBDIR)"
+  elif fs_is_exec_safe "$SDHOME"; then
     mkdir -p "$SDHOME/sing-box"
     mv "$BIN" "$SDHOME/sing-box/sing-box" && chmod +x "$SDHOME/sing-box/sing-box"
     ln -sf "$SDHOME/sing-box/sing-box" "$SBDIR/sing-box"
     ln -sf "$SDHOME/sing-box/sing-box" /usr/bin/sing-box 2>/dev/null || true
+    say "internal flash full -> installed binary to exec-safe work dir ($SDHOME)"
   else
-    mv "$BIN" "$SBDIR/sing-box" && chmod +x "$SBDIR/sing-box"
-    ln -sf "$SBDIR/sing-box" /usr/bin/sing-box 2>/dev/null || true
+    rm -rf "$TMP"
+    die "sing-box ($((BINSZ/1024/1024))MB) doesn't fit in internal flash (~$((${SBFREE:-0}/1024/1024))MB free) and the only spare space is a FUSE/exFAT card, which can't reliably execute binaries. Free internal flash (remove old packages) or format the card as ext4, then re-run."
   fi
   rm -rf "$TMP"
   # decisive test: does it actually run on THIS libc? (glibc-on-musl fails here)
-  VOUT=$(sb_version)
+  VOUT=$(sb_version || true)
   if [ -n "$VOUT" ]; then say "installed: $VOUT (asset ${ASSET}${SUF})"; break; fi
   say "  ${ASSET}${SUF} downloaded but did not run on this libc -> trying next variant"
 done
