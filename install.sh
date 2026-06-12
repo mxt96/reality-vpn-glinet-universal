@@ -70,12 +70,25 @@ TAG=$(curl -4 -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/late
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$TAG" ] || die "could not fetch latest sing-box release tag (no internet / GitHub blocked)."
 VER=${TAG#v}
+# Probe `sing-box version` robustly on RAM-starved routers. The download+unpack leaves
+# buff/cache resident; on a 128MB router (E750) that can OOM-kill the ~35MB binary the
+# instant it execs -> the shell prints "Terminated" and the probe returns empty, which
+# looked like "downloaded but did not run on this libc" and aborted a perfectly good
+# install before the panel/tab step. So: free page cache first, and retry once.
+sb_version() {
+  for _t in 1 2; do
+    sync 2>/dev/null; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+    _v=$("$SBDIR/sing-box" version 2>/dev/null | head -1)
+    [ -n "$_v" ] && { echo "$_v"; return 0; }
+  done
+  return 1
+}
 # Re-run / upgrade friendliness: if sing-box is already installed and RUNS, reuse it
 # and SKIP the ~85MB download+unpack. On tiny routers (E750 has ~28MB free after the
 # first install) the space check below would otherwise abort a re-run -> the UI/panel
 # never get installed. To force a fresh sing-box: rm "$SBDIR/sing-box" then re-run.
 VOUT=""
-EXIST=$("$SBDIR/sing-box" version 2>/dev/null | head -1)
+EXIST=$(sb_version)
 if [ -n "$EXIST" ]; then
   VOUT="$EXIST"; mkdir -p "$SBDIR/servers"
   say "sing-box already installed ($EXIST) -> reusing, skipping download"
@@ -140,7 +153,7 @@ for SUF in $SUFFIXES; do
   fi
   rm -rf "$TMP"
   # decisive test: does it actually run on THIS libc? (glibc-on-musl fails here)
-  VOUT=$("$SBDIR/sing-box" version 2>/dev/null | head -1)
+  VOUT=$(sb_version)
   if [ -n "$VOUT" ]; then say "installed: $VOUT (asset ${ASSET}${SUF})"; break; fi
   say "  ${ASSET}${SUF} downloaded but did not run on this libc -> trying next variant"
 done
