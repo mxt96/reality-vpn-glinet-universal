@@ -70,54 +70,49 @@ cat > "$CFG" <<JSON
 JSON
 # Ensure swap is on before any heavy sing-box exec (RAM-starved routers). install.sh
 # creates the swapfile on persistent storage; re-enable it here in case of a reboot
-# where rc.local hasn't run yet. Cheap no-op on boxes with plenty of RAM / no swapfile.
+# where rc.local hasn't run yet. SILENT no-op on roomy-RAM boxes / no swapfile (stdout
+# MUST stay clean — the panel reads our first stdout line as the OK/FAIL verdict).
 for _sw in /mnt/*/reality-swap /tmp/mountd/*/reality-swap /overlay/reality-swap; do
-  [ -f "$_sw" ] && ! grep -qF "$_sw" /proc/swaps 2>/dev/null && swapon "$_sw" 2>/dev/null
+  [ -f "$_sw" ] && ! grep -qF "$_sw" /proc/swaps 2>/dev/null && swapon "$_sw" >/dev/null 2>&1
 done
 
-# Validate the new config by RUNTIME, not by `sing-box check` alone. On a RAM-starved
-# router (E750: 128MB) `check` execs the ~58MB binary and can be OOM-killed even for a
-# perfectly valid config — sometimes with EMPTY stderr ("Terminated"), sometimes with a
-# Go-runtime "out of memory" / "signal: killed" message — so its exit status LIES, and
-# the panel then reports "Server config rejected" for a good config. The ground truth is
-# whether sing-box actually loads this config and serves: its Clash API (127.0.0.1:9090)
-# answers ONLY after the config parsed and the service came up. So: restart, poll the
-# API, trust THAT. `check` is consulted only when the service didn't surface, to (a) let
-# a valid-but-slow start still pass and (b) print the real reason for a genuinely bad
-# config. Bonus: the common path now does ONE heavy exec (the running daemon), not two.
+# Validation is CHECK-FIRST so the healthy-router path stays FAST. The panel reads
+# rebuild.sh's first stdout line over an RPC with a read timeout; v1.2.7 polled the
+# service for up to 12s before printing OK, so on a perfectly fine router (Beryl) the
+# RPC timed out and the panel showed "Server config rejected". Fix: if `sing-box check`
+# passes (1-2s on any box with enough RAM) -> apply + OK immediately (identical to the
+# proven v1.2.6 path). ONLY if check FAILS do we fall back to a RUNTIME probe — on a
+# RAM-starved router (E750 128MB) `check` execs the ~58MB binary and gets OOM-killed even
+# for a valid config (exit status lies). There we (re)start and trust the Clash API
+# (127.0.0.1:9090) coming up (swap from install.sh gives the headroom). Genuinely bad
+# config = check fails AND service won't surface -> roll back + CHECK_FAIL.
 svc_up() {
   curl -s --max-time 2 -o /dev/null "http://127.0.0.1:9090/version" 2>/dev/null && return 0
   command -v pidof >/dev/null 2>&1 && pidof sing-box >/dev/null 2>&1 && return 0
   return 1
 }
-if [ -x /etc/init.d/sing-box ]; then
-  /etc/init.d/sing-box restart 2>/dev/null
+if "$SB" check -c "$CFG" 2>/tmp/sb-check.err; then
+  # valid config — fast path, byte-for-byte the proven v1.2.6 OK branch (healthy routers).
+  [ -x /etc/init.d/sing-box ] && /etc/init.d/sing-box restart >/dev/null 2>&1
+  sleep 6
+  sh "$SBDIR/postup.sh" >/dev/null 2>&1
+  echo OK
+elif [ -x /etc/init.d/sing-box ]; then
+  # check FAILED — could be OOM on a starved router (valid config) or a real bad config.
+  # Decide by whether the service actually comes up with this config (Clash API answers).
+  /etc/init.d/sing-box restart >/dev/null 2>&1
   up=0; i=0
-  while [ "$i" -lt 12 ]; do svc_up && { up=1; break; }; sleep 1; i=$((i+1)); done
+  while [ "$i" -lt 7 ]; do svc_up && { up=1; break; }; sleep 1; i=$((i+1)); done
   if [ "$up" = 1 ]; then
-    # MUST silence stdout too: on fw4/iptables-nft routers postup's iptables commands
-    # print rule lines, which would otherwise pollute this script's output and make
-    # callers that read the first line (panel addserver/delserver) misread "OK".
-    sh "$SBDIR/postup.sh" >/dev/null 2>&1
-    echo OK
-  elif "$SB" check -c "$CFG" 2>/tmp/sb-check.err; then
-    # service slow to surface (geoip pull / tun race) but the config IS valid -> accept;
-    # procd keeps (re)starting it and it comes up once memory settles.
     sh "$SBDIR/postup.sh" >/dev/null 2>&1
     echo OK
   else
-    # service didn't come up AND check reports a real error -> genuinely bad config.
     cp -f "$CFG.bak" "$CFG" 2>/dev/null
-    /etc/init.d/sing-box restart 2>/dev/null
+    /etc/init.d/sing-box restart >/dev/null 2>&1
     echo "CHECK_FAIL"; head -5 /tmp/sb-check.err 2>/dev/null
   fi
 else
-  # no service manager (test harness / pre-install) -> static check decides.
-  if "$SB" check -c "$CFG" 2>/tmp/sb-check.err; then
-    sh "$SBDIR/postup.sh" >/dev/null 2>&1
-    echo OK
-  else
-    cp -f "$CFG.bak" "$CFG" 2>/dev/null
-    echo "CHECK_FAIL"; head -5 /tmp/sb-check.err 2>/dev/null
-  fi
+  # no service manager (test harness / pre-install) and check failed -> reject.
+  cp -f "$CFG.bak" "$CFG" 2>/dev/null
+  echo "CHECK_FAIL"; head -5 /tmp/sb-check.err 2>/dev/null
 fi
