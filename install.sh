@@ -265,6 +265,16 @@ if ! grep -qF "mac-tool.sh boot" "$RCLM" 2>/dev/null; then
   fi
   chmod +x "$RCLM" 2>/dev/null
 fi
+# Default-ON "random MAC on reboot" (mason's request). Do it ONCE — seed the factory MAC
+# cache FIRST (so the current real MAC is remembered as factory before any randomize),
+# then set the flag. A marker stops later upgrades from re-forcing it, so a user who turns
+# the toggle OFF stays off across updates.
+if [ ! -f "$SBDIR/.mac-onboot-defaulted" ]; then
+  sh "$SBDIR/mac-tool.sh" status >/dev/null 2>&1   # caches factory MAC
+  : > "$SBDIR/mac-onboot"
+  : > "$SBDIR/.mac-onboot-defaulted"
+  say "random-MAC-on-reboot enabled by default"
+fi
 # ship empty servers dir + the README/example for reference
 cp -r "$D/servers/." "$SBDIR/servers/" 2>/dev/null || true
 # Remove ONLY the shipped reference example (rebuild.sh globs servers/*.json, so the
