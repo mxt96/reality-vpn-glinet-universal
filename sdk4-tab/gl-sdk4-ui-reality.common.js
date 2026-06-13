@@ -36,7 +36,7 @@
         st: {},                 // last get_status result
         vpnOn: false, ksOn: false, tunneled: false,
         servers: [], serversLoaded: false,
-        addLink: "", addName: "", addMsg: "", adding: false,
+        addLink: "", addName: "", addMsg: "", addOk: false, adding: false,
         editTag: "", editLink: "", editName: "", editMsg: "", editing: false,
         spinning: false, spd: null, spdRunning: false,
         traf: { upS: 0, downS: 0, up: 0, down: 0, conns: 0, ok: false },
@@ -113,17 +113,18 @@
             self.adding = false;
             if (r && r.ok && r.added > 0) {
               self.addLink = ""; self.addName = "";
+              self.addOk = true;
               self.addMsg = "Added " + r.added + (r.failed ? (", skipped " + r.failed) : "");
               self.loadServers();
-            } else { self.addMsg = (r && r.added === 0) ? "No valid configs found" : ((r && r.msg) ? r.msg : "Import failed"); }
-          }).catch(function () { self.adding = false; self.addMsg = "Import failed"; });
+            } else { self.addOk = false; self.addMsg = (r && r.added === 0) ? "No valid configs found" : ((r && r.msg) ? r.msg : "Import failed"); }
+          }).catch(function () { self.adding = false; self.addOk = false; self.addMsg = "Import failed"; });
           return;
         }
         call("add_server", { link: raw, name: (this.addName || "").trim() }).then(function (r) {
           self.adding = false;
           if (r && r.ok) { self.addLink = ""; self.addName = ""; self.addMsg = ""; self.loadServers(); }
-          else { self.addMsg = (r && r.msg) ? r.msg : "Failed to add server"; }
-        }).catch(function () { self.adding = false; self.addMsg = "Failed to add server"; });
+          else { self.addOk = false; self.addMsg = (r && r.msg) ? r.msg : "Failed to add server"; }
+        }).catch(function () { self.adding = false; self.addOk = false; self.addMsg = "Failed to add server"; });
       },
       delServer: function (tag) {
         // No window.confirm() here: GL's embedded panel webview can silently
@@ -294,7 +295,7 @@
         h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.addLink, type: "textarea", rows: 4, placeholder: "One link, OR many (one per line), OR a subscription URL / base64", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
         h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.addName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.addName = v; } } }),
         h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.adding }, on: { click: function () { t.addServer(); } } }, [t._v("Add server")]),
-        t.addMsg ? h("span", { style: { marginLeft: "10px", color: "#e5534b", fontSize: "13px" } }, [t._v(t.addMsg)]) : null
+        t.addMsg ? h("span", { style: { marginLeft: "10px", color: (t.addOk ? "#10b981" : "#e5534b"), fontSize: "13px" } }, [t._v(t.addMsg)]) : null
       ]);
 
       // ---- speedtest ----
