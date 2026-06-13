@@ -52,9 +52,22 @@ rand_mac() {
 
 apply_mac() {   # $1 = mac
   sec=$(wan_uci_dev) || return 1
+  dev=$(wan_dev)
   uci set "network.$sec.macaddr=$1" 2>/dev/null || return 1
   uci commit network 2>/dev/null
-  /etc/init.d/network reload >/dev/null 2>&1
+  # Reconfigure ONLY the WAN device. A full `/etc/init.d/network reload` also blips
+  # br-lan, which drops the admin's panel session and bounces them to /#/login (mason
+  # hit this). Set the MAC on the WAN device directly + re-DHCP just the WAN interface;
+  # the LAN/panel stays up. Fall back to a full reload only if the WAN didn't recover.
+  if [ -n "$dev" ]; then
+    ip link set dev "$dev" down 2>/dev/null
+    ip link set dev "$dev" address "$1" 2>/dev/null
+    ifup wan 2>/dev/null
+    sleep 5
+    ip route show default 2>/dev/null | grep -q default || /etc/init.d/network reload >/dev/null 2>&1
+  else
+    /etc/init.d/network reload >/dev/null 2>&1
+  fi
 }
 
 have_net() { curl -s --max-time 6 -o /dev/null "$CHECK_URL" 2>/dev/null; }
