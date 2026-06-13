@@ -429,14 +429,26 @@ if [ -d /usr/lib/oui-httpd/rpc ] && [ -d /usr/share/oui/menu.d ] && [ -d /www/vi
     # lacks gzip_static, the plain .js is served anyway -> no /#/login bounce.
     cp "$D/sdk4-tab/gl-sdk4-ui-reality.common.js"       /www/views/gl-sdk4-ui-reality.common.js
     gzip -c "$D/sdk4-tab/gl-sdk4-ui-reality.common.js" > /www/views/gl-sdk4-ui-reality.common.js.gz 2>/dev/null
+    # Only the lua rpc handler / validator need a FULL nginx restart (to drop OpenResty's
+    # cached lua) — and that restart bounces the admin to /#/login. So detect whether they
+    # ACTUALLY changed (vs the deployed copies) BEFORE overwriting; if only JS/scripts
+    # changed, a graceful reload suffices and the user is NOT kicked to login (mason: "при
+    # обновлении тоже выкидывает"). First install (no deployed copy) -> cmp fails -> restart.
+    LUA_CHANGED=0
+    cmp -s "$D/sdk4-tab/reality.oui.lua" /usr/lib/oui-httpd/rpc/reality 2>/dev/null || LUA_CHANGED=1
+    cmp -s "$D/sdk4-tab/reality.validator.lua" /usr/share/gl-validator.d/reality.lua 2>/dev/null || LUA_CHANGED=1
     cp "$D/sdk4-tab/reality.oui.lua"                    /usr/lib/oui-httpd/rpc/reality
     cp "$D/sdk4-tab/reality.validator.lua"              /usr/share/gl-validator.d/reality.lua
-    # CRITICAL reload sequence (order matters — get this exact or you lock the
-    # user out of the panel): a FULL nginx restart is required to drop OpenResty's
-    # cached lua so the new `reality` rpc handler loads (a plain reload won't);
-    # BUT a full nginx restart breaks GL's post-login session websocket bridge,
-    # so we MUST immediately rebuild it with gl-ngx-session. Do BOTH, in order.
-    /etc/init.d/nginx restart 2>/dev/null || true; /etc/init.d/gl-ngx-session restart 2>/dev/null || true
+    if [ "$LUA_CHANGED" = 1 ]; then
+      # lua handler changed -> MUST drop OpenResty's cache with a full restart (this
+      # bounces login); then immediately rebuild GL's session-ws bridge. Order matters.
+      say "rpc handler changed -> nginx restart (panel re-login needed once)"
+      /etc/init.d/nginx restart 2>/dev/null || true; /etc/init.d/gl-ngx-session restart 2>/dev/null || true
+    else
+      # only static/scripts changed -> graceful reload keeps workers + the session bridge
+      # alive, so NO /#/login bounce.
+      /etc/init.d/nginx reload 2>/dev/null || /etc/init.d/nginx restart 2>/dev/null || true
+    fi
     # nginx needs a moment to come back up before the self-diagnostic curls below;
     # otherwise they race the restart and (under set -e) a transient curl failure
     # (exit 56) aborts the install right before step 10 / the DONE message.
