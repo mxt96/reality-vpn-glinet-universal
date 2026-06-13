@@ -189,6 +189,61 @@ done
 fi
 [ -n "$VOUT" ] || die "sing-box did not run (no musl/static build matched arch '$ASSET'). Tell me the router model."
 
+# ---- 4.5) swap for RAM-starved routers -------------------------------------
+# E750/AR300M-class boxes have 128MB RAM; the ~58MB sing-box binary + geoip leaves
+# almost nothing, so `sing-box check`/`run` get OOM-killed and the panel then reports
+# "Server config rejected" for a perfectly valid config (and the tunnel can't run at
+# all). A swapfile on PERSISTENT external storage (microSD/USB) gives it headroom.
+# Idempotent: created once, re-enabled every install; skipped on roomy-RAM boxes.
+# best-effort: this whole block must NEVER abort the install (it runs BEFORE the panel
+# install) — so drop set -e for it and restore after.
+set +e
+MEMK=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+SWAPK=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+if [ -n "$MEMK" ] && [ "$MEMK" -lt 262144 ] && [ "${SWAPK:-0}" -lt 131072 ]; then
+  # need a writable, PERSISTENT (non-tmpfs) mount with room for a 256MB swapfile.
+  SWAPDIR=""
+  for c in /mnt/mmcblk0p1 /mnt/sda1 /mnt/sdcard /tmp/mountd/disk1_part1 /overlay; do
+    [ -d "$c" ] && [ -w "$c" ] || continue
+    FST=$(awk -v m="$c" '$2==m{print $3}' /proc/mounts 2>/dev/null | tail -1)
+    case "$FST" in tmpfs|ramfs|"") continue;; esac          # never put swap in RAM
+    FK=$(df -k "$c" 2>/dev/null | awk 'NR==2{print $4}')
+    [ -n "$FK" ] && [ "$FK" -ge 307200 ] && { SWAPDIR="$c"; break; }   # >=300MB free
+  done
+  if [ -n "$SWAPDIR" ]; then
+    SWAPF="$SWAPDIR/reality-swap"
+    if [ ! -f "$SWAPF" ]; then
+      say "low RAM (${MEMK}kB), no swap -> creating 256MB swap at $SWAPF"
+      if dd if=/dev/zero of="$SWAPF" bs=1024 count=262144 2>/dev/null; then
+        chmod 600 "$SWAPF"; mkswap "$SWAPF" >/dev/null 2>&1 || say "WARN: mkswap unavailable"
+      else
+        rm -f "$SWAPF" 2>/dev/null; say "WARN: could not allocate swapfile (disk full?)"
+      fi
+    fi
+    if [ -f "$SWAPF" ]; then
+      if swapon "$SWAPF" 2>/dev/null; then
+        say "swap on: $(free -m 2>/dev/null | awk '/Swap/{print $2\"MB\"}')"
+      else
+        say "WARN: swapon failed (busybox lacks swap support? opkg install swap-utils)"
+      fi
+      # persist across reboot via rc.local (idempotent, portable busybox awk insert)
+      RCL=/etc/rc.local
+      [ -f "$RCL" ] || printf '#!/bin/sh\nexit 0\n' > "$RCL"
+      if ! grep -qF "swapon $SWAPF" "$RCL" 2>/dev/null; then
+        if grep -q '^exit 0' "$RCL" 2>/dev/null; then
+          awk -v L="swapon $SWAPF 2>/dev/null" '/^exit 0/ && !d {print L; d=1} {print}' "$RCL" > "$RCL.tmp" && mv "$RCL.tmp" "$RCL"
+        else
+          echo "swapon $SWAPF 2>/dev/null" >> "$RCL"
+        fi
+        chmod +x "$RCL" 2>/dev/null
+      fi
+    fi
+  else
+    say "NOTE: low RAM (${MEMK}kB) but no persistent storage with 300MB free -> insert a microSD to enable swap, else sing-box may OOM."
+  fi
+fi
+set -e   # restore strict mode after best-effort swap provisioning
+
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
          add-server.sh list-servers.sh del-server.sh import-links.sh; do
