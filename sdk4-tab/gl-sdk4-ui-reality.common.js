@@ -196,19 +196,16 @@
         var self = this;
         return call("get_mac").then(function (r) { self.macLoaded = true; if (r) self.mac = r; }).catch(function () { self.macLoaded = true; });
       },
-      macRandom: function () {
-        var self = this; this.macBusy = true; this.macMsg = "";
-        call("mac_random").then(function (r) {
-          self.macMsg = (r && r.msg) ? r.msg : "";
-          setTimeout(function () { self.macBusy = false; self.loadMac(); }, 9000);
-        }).catch(function () { self.macBusy = false; self.macMsg = "Failed"; });
-      },
-      macReset: function () {
-        var self = this; this.macBusy = true; this.macMsg = "";
-        call("mac_reset").then(function (r) {
-          self.macMsg = (r && r.msg) ? r.msg : "";
-          setTimeout(function () { self.macBusy = false; self.loadMac(); }, 9000);
-        }).catch(function () { self.macBusy = false; self.macMsg = "Failed"; });
+      macRandom: function () { this._macApply("mac_random"); },
+      macReset: function () { this._macApply("mac_reset"); },
+      _macApply: function (method) {
+        // Applying a MAC reloads the WAN, which can drop THIS rpc's own reply mid-flight.
+        // A lost reply is EXPECTED here, NOT a failure — so don't show "Failed"; just show
+        // "applying…" and re-read the status after the network settles (which shows the
+        // real result either way).
+        var self = this; this.macBusy = true; this.macMsg = "Applying — the connection will blink…";
+        var done = function () { setTimeout(function () { self.macBusy = false; self.macMsg = ""; self.loadMac(); }, 9000); };
+        call(method).then(function (r) { if (r && r.msg) self.macMsg = r.msg; done(); }).catch(done);
       },
       toggleMacOnboot: function (val) {
         var self = this; this.mac.onboot = val;
