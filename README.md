@@ -23,8 +23,12 @@ On the router (SSH in as root). Single line on purpose — `&&`-chained so it st
 works if your mobile SSH client strips newlines on paste:
 
 ```sh
-cd /tmp && rm -rf reality-vpn-glinet-universal-main && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz && cd reality-vpn-glinet-universal-main && sh install.sh
+ntpd -nq -p time.google.com 2>/dev/null || ntpd -nq -p pool.ntp.org 2>/dev/null; cd /tmp && rm -rf reality-vpn-glinet-universal-main && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz && cd reality-vpn-glinet-universal-main && sh install.sh
 ```
+
+(The `ntpd …;` prefix syncs the clock first — if the router's time drifted to the past
+after a reboot, `curl` would otherwise reject GitHub's TLS cert as "not yet valid". The
+panel's own Update button already does this sync internally.)
 
 No `curl` on the
 router? `opkg update && opkg install curl`. You can also download the repo ZIP

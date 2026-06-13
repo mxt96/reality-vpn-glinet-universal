@@ -315,6 +315,10 @@ function M.do_update(args)
     local script = [[#!/bin/sh
 [ -f /tmp/sb-update.running ] && exit 0
 touch /tmp/sb-update.running
+# sync the clock FIRST — if the router's time is wrong (drifts after a reboot, weak NTP)
+# curl rejects GitHub's TLS cert as "not yet valid" and the download fails. NTP is UDP/no
+# cert so it works regardless of the current clock.
+ntpd -nq -p time.google.com >/dev/null 2>&1 || ntpd -nq -p pool.ntp.org >/dev/null 2>&1 || true
 cd /tmp && rm -rf reality-vpn-glinet-universal-main \
   && curl -fsSL https://github.com/mxt96/reality-vpn-glinet-universal/archive/refs/heads/main.tar.gz | tar xz \
   && cd reality-vpn-glinet-universal-main && sh install.sh
