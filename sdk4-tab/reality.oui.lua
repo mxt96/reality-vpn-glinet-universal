@@ -332,4 +332,40 @@ rm -f /tmp/sb-update.running
     return { ok = true, msg = "Update scheduled — installs within ~1-2 min, page reloads" }
 end
 
+-- ---- WAN MAC privacy -----------------------------------------------------
+-- Randomize / reset the WAN MAC, and toggle "random MAC on every reboot".
+-- Backed by /etc/sing-box/mac-tool.sh (changing the MAC briefly bounces the WAN, so
+-- these run it detached and return quickly; the panel re-reads status afterwards).
+local MACTOOL = "/etc/sing-box/mac-tool.sh"
+
+function M.get_mac(args)
+    local out = sh(MACTOOL .. " status 2>/dev/null")
+    local t = { dev = "", current = "", factory = "", onboot = false }
+    for line in (out or ""):gmatch("[^\n]+") do
+        local k, v = line:match("^(%w+)=(.*)$")
+        if k == "dev" then t.dev = v
+        elseif k == "current" then t.current = v
+        elseif k == "factory" then t.factory = v
+        elseif k == "onboot" then t.onboot = (v == "1") end
+    end
+    return t
+end
+
+function M.mac_random(args)
+    -- detached: the network reload drops the WAN (and this RPC's own link); fire & report
+    sh("(" .. MACTOOL .. " random >/tmp/mac-last 2>&1) >/dev/null 2>&1 &")
+    return { ok = true, msg = "Generating a new MAC — the connection will blink for a few seconds" }
+end
+
+function M.mac_reset(args)
+    sh("(" .. MACTOOL .. " reset >/tmp/mac-last 2>&1) >/dev/null 2>&1 &")
+    return { ok = true, msg = "Restoring the factory MAC — the connection will blink for a few seconds" }
+end
+
+function M.mac_onboot(args)
+    local on = args and args.on
+    local r = trim(sh(MACTOOL .. " onboot " .. (on and "on" or "off") .. " 2>/dev/null"))
+    return { ok = true, onboot = (r == "on") }
+end
+
 return M

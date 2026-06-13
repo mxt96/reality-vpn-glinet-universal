@@ -203,7 +203,11 @@ SWAPK=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null)
 if [ -n "$MEMK" ] && [ "$MEMK" -lt 262144 ] && [ "${SWAPK:-0}" -lt 131072 ]; then
   # need a writable, PERSISTENT (non-tmpfs) mount with room for a 256MB swapfile.
   SWAPDIR=""
-  for c in /mnt/mmcblk0p1 /mnt/sda1 /mnt/sdcard /tmp/mountd/disk1_part1 /overlay; do
+  # GL auto-mounts SD/USB by LABEL (e.g. /mnt/Untitled), so a fixed path list misses it.
+  # Scan /proc/mounts for any real (non-tmpfs) external mount under /mnt or /tmp/mountd,
+  # then fall back to the well-known fixed paths.
+  SDCANDS=$(awk '($2 ~ /^\/mnt\// || $2 ~ /^\/tmp\/mountd\//) && $3 !~ /^(tmpfs|ramfs|overlay)$/ {print $2}' /proc/mounts 2>/dev/null)
+  for c in $SDCANDS /mnt/mmcblk0p1 /mnt/sda1 /mnt/sdcard /tmp/mountd/disk1_part1 /overlay; do
     [ -d "$c" ] && [ -w "$c" ] || continue
     FST=$(awk -v m="$c" '$2==m{print $3}' /proc/mounts 2>/dev/null | tail -1)
     case "$FST" in tmpfs|ramfs|"") continue;; esac          # never put swap in RAM
@@ -246,9 +250,21 @@ set -e   # restore strict mode after best-effort swap provisioning
 
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
-         add-server.sh list-servers.sh del-server.sh import-links.sh; do
+         add-server.sh list-servers.sh del-server.sh import-links.sh mac-tool.sh; do
   cp "$D/$s" "$SBDIR/$s" && chmod +x "$SBDIR/$s"
 done
+# MAC-on-reboot boot hook: run the randomizer early at boot (gated by the mac-onboot flag,
+# self-heals to factory if the random MAC loses internet). Idempotent rc.local insert.
+RCLM=/etc/rc.local
+[ -f "$RCLM" ] || printf '#!/bin/sh\nexit 0\n' > "$RCLM"
+if ! grep -qF "mac-tool.sh boot" "$RCLM" 2>/dev/null; then
+  if grep -q '^exit 0' "$RCLM" 2>/dev/null; then
+    awk '/^exit 0/ && !d {print "sh /etc/sing-box/mac-tool.sh boot >/dev/null 2>&1 &"; d=1} {print}' "$RCLM" > "$RCLM.tmp" && mv "$RCLM.tmp" "$RCLM"
+  else
+    echo "sh /etc/sing-box/mac-tool.sh boot >/dev/null 2>&1 &" >> "$RCLM"
+  fi
+  chmod +x "$RCLM" 2>/dev/null
+fi
 # ship empty servers dir + the README/example for reference
 cp -r "$D/servers/." "$SBDIR/servers/" 2>/dev/null || true
 # Remove ONLY the shipped reference example (rebuild.sh globs servers/*.json, so the

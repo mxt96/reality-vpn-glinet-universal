@@ -41,13 +41,15 @@
         spinning: false, spd: null, spdRunning: false,
         traf: { upS: 0, downS: 0, up: 0, down: 0, conns: 0, ok: false },
         ver: { installed: "", latest: "", update: false }, verLoaded: false,
-        checking: false, updating: false, updateMsg: ""
+        checking: false, updating: false, updateMsg: "",
+        mac: { dev: "", current: "", factory: "", onboot: false }, macLoaded: false, macBusy: false, macMsg: ""
       };
     },
     created: function () {
       this.refresh();
       this.loadServers();
       this.checkUpdate();
+      this.loadMac();
       var self = this;
       this._timer = setInterval(function () { if (!self.busy) self.refresh(); }, 15000);
       // live traffic: poll fast (every 2s) so the user can SEE data flowing through
@@ -189,6 +191,28 @@
           // pick up the new version + confirmation.
           setTimeout(function () { try { location.reload(); } catch (e) {} }, 85000);
         }).catch(function () { self.updating = false; self.updateMsg = "Update failed to start"; });
+      },
+      loadMac: function () {
+        var self = this;
+        return call("get_mac").then(function (r) { self.macLoaded = true; if (r) self.mac = r; }).catch(function () { self.macLoaded = true; });
+      },
+      macRandom: function () {
+        var self = this; this.macBusy = true; this.macMsg = "";
+        call("mac_random").then(function (r) {
+          self.macMsg = (r && r.msg) ? r.msg : "";
+          setTimeout(function () { self.macBusy = false; self.loadMac(); }, 9000);
+        }).catch(function () { self.macBusy = false; self.macMsg = "Failed"; });
+      },
+      macReset: function () {
+        var self = this; this.macBusy = true; this.macMsg = "";
+        call("mac_reset").then(function (r) {
+          self.macMsg = (r && r.msg) ? r.msg : "";
+          setTimeout(function () { self.macBusy = false; self.loadMac(); }, 9000);
+        }).catch(function () { self.macBusy = false; self.macMsg = "Failed"; });
+      },
+      toggleMacOnboot: function (val) {
+        var self = this; this.mac.onboot = val;
+        call("mac_onboot", { on: val }).then(function (r) { if (r) self.mac.onboot = !!r.onboot; }).catch(function () { self.loadMac(); });
       }
     },
     render: function (h) {
@@ -336,6 +360,21 @@
             h("gl-button", { attrs: { type: "primary", loading: t.spdRunning }, on: { click: function () { t.runSpeedtest(); } } }, [t._v(t.spdRunning ? "Testing…" : "Run speed test")]),
             spdLine
           ])
+        ])]),
+
+        // MAC PRIVACY
+        h("gl-card", [ h("div", { staticClass: "main" }, [
+          sectionTitle("MAC address (privacy)"),
+          kv("WAN interface", t.mac.dev),
+          kv("Current MAC", t.mac.current),
+          kv("Factory MAC", t.mac.factory),
+          toggleRow("Random MAC on reboot", "New random MAC each boot — auto-reverts if it loses internet", t.mac.onboot, function (v) { t.toggleMacOnboot(v); }),
+          h("div", { staticClass: "btns", style: { marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap" } }, [
+            h("gl-button", { attrs: { type: "primary", loading: t.macBusy }, on: { click: function () { t.macRandom(); } } }, [t._v("Change MAC now")]),
+            h("gl-button", { staticClass: "btn-item", style: { marginLeft: "8px" }, attrs: { disabled: t.macBusy }, on: { click: function () { t.macReset(); } } }, [t._v("Reset to factory")]),
+            t.macMsg ? h("span", { style: { marginLeft: "10px", color: "#8a8f99", fontSize: "13px" } }, [t._v(t.macMsg)]) : null
+          ]),
+          h("div", { style: { marginTop: "8px", fontSize: "12px", color: "#8a8f99" } }, [t._v("Changing the MAC briefly drops the WAN — the page may blink. On a 4G/LTE uplink the MAC has no effect (carrier identifies by IMEI).")])
         ])]),
 
         // VERSION / UPDATE
