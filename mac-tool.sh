@@ -12,8 +12,18 @@ SBDIR=${SBDIR:-/etc/sing-box}
 FLAG="$SBDIR/mac-onboot"
 FACT="$SBDIR/mac-factory"
 CHECK_URL="https://chat.tradefilebox.net/"
+# oui-httpd calls us with a minimal PATH that lacks /sbin & /usr/sbin where ip/uci live,
+# so the WAN device came back empty in the panel. Force a full PATH.
+export PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
 
-wan_dev() { ip route show default 2>/dev/null | awk '/default/{print $5; exit}'; }
+wan_dev() {
+  d=$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')
+  # fallback: the uci wan interface's device, then common names
+  [ -n "$d" ] || d=$(uci -q get network.wan.device)
+  [ -n "$d" ] || d=$(uci -q get network.wan.ifname)
+  [ -n "$d" ] || for x in eth0 wan wwan eth1; do [ -e "/sys/class/net/$x" ] && { d=$x; break; }; done
+  echo "$d"
+}
 
 # find the uci `@device[N]` section whose .name matches the WAN device (e.g. eth0)
 wan_uci_dev() {
