@@ -365,7 +365,7 @@
           kv("WAN interface", t.mac.dev),
           kv("Current MAC", t.mac.current),
           kv("Factory MAC", t.mac.factory),
-          toggleRow("Random MAC on reboot", "New random MAC each boot — auto-reverts if it loses internet", t.mac.onboot, function (v) { t.toggleMacOnboot(v); }),
+          toggleRow("Random MAC on reboot", "New random MAC on every reboot", t.mac.onboot, function (v) { t.toggleMacOnboot(v); }),
           h("div", { staticClass: "btns", style: { marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap" } }, [
             h("gl-button", { attrs: { type: "primary", loading: t.macBusy }, on: { click: function () { t.macRandom(); } } }, [t._v("Change MAC now")]),
             h("gl-button", { staticClass: "btn-item", style: { marginLeft: "8px" }, attrs: { disabled: t.macBusy }, on: { click: function () { t.macReset(); } } }, [t._v("Reset to factory")]),

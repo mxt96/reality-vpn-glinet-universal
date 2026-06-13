@@ -5,8 +5,7 @@
 #   random            -> apply a fresh locally-administered random MAC, print it
 #   reset             -> restore the cached factory MAC
 #   onboot on|off     -> toggle "random MAC on every reboot"
-#   boot              -> if onboot is set: apply a random MAC, then SELF-HEAL (revert
-#                        to factory if the new MAC can't reach the internet)
+#   boot              -> if onboot is set: apply a random MAC (no auto-revert)
 # MAC changes target the WAN device's uci `device` section (works for ethernet WAN).
 SBDIR=${SBDIR:-/etc/sing-box}
 FLAG="$SBDIR/mac-onboot"
@@ -98,13 +97,9 @@ case "$1" in
     ;;
   boot)
     [ -f "$FLAG" ] || exit 0
-    factory_mac >/dev/null
+    factory_mac >/dev/null          # keep caching factory so "Reset to factory" still works
     NEW=$(rand_mac); [ -n "$NEW" ] && apply_mac "$NEW"
-    # SELF-HEAL: if the random MAC doesn't get internet (e.g. MAC-whitelisted network),
-    # roll back to the factory MAC so the router is never left offline after a reboot.
-    i=0; ok=0
-    while [ $i -lt 6 ]; do sleep 5; have_net && { ok=1; break; }; i=$((i+1)); done
-    [ "$ok" = 1 ] || apply_mac "$(factory_mac)"
+    # (Auto-revert-to-factory self-heal removed per mason — the random MAC just stays.)
     ;;
   *) echo "usage: mac-tool.sh status|random|reset|onboot on|off|boot" ; exit 1 ;;
 esac
