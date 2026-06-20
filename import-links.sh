@@ -44,7 +44,11 @@ RAW=$(printf '%s' "$RAW" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 case "$RAW" in
   http://*|https://*)
     [ "$(printf '%s' "$RAW" | wc -l)" -eq 0 ] && {
-      FETCH=$(curl -fsSL --max-time 20 "$RAW" 2>/dev/null)
+      # Send a recognized proxy-client User-Agent. Many panels (Remnawave/Marzban
+      # style) do UA content-negotiation: a generic curl UA gets a placeholder or a
+      # sing-box JSON, while a known client UA returns the base64 share-link list we
+      # parse. v2rayNG is the most widely-accepted "give me share-links" UA.
+      FETCH=$(curl -fsSL --max-time 20 -A 'v2rayNG/1.8.19' "$RAW" 2>/dev/null)
       [ -n "$FETCH" ] && RAW=$(printf '%s' "$FETCH" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     } ;;
 esac
@@ -59,6 +63,13 @@ esac
 ADDED=0; FAILED=0; TAGS=""; FAILED_FILES=""
 add_one(){ # add_one <link>  -> writes file, echoes tag on success (no rebuild)
   _l="$1"
+  # Skip provider "placeholder" entries: device-locked / unsupported-client panels
+  # (chik-chirik etc.) return a fake node — host 0.0.0.0, port 1, all-zero uuid —
+  # whose #name reads "Приложение не поддерживается". Importing it would create a
+  # dead server. Drop it so a gated subscription yields 0, not a broken outbound.
+  case "$_l" in
+    *@0.0.0.0:*|*@0.0.0.0/*|*@127.0.0.1:1\?*|*00000000-0000-0000-0000-000000000000*) return 1 ;;
+  esac
   _nm=$(printf '%s' "$_l" | sed -n 's/^[^#]*#//p'); _nm=$(urldec "$_nm")
   _base=$(printf '%s' "$_nm" | tr -c 'A-Za-z0-9._-' '_' | sed 's/^_*//; s/_*$//')
   [ -z "$_base" ] && _base="srv-$(date +%s)"

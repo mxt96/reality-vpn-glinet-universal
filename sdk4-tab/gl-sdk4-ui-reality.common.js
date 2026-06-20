@@ -129,6 +129,12 @@
         if (d < 86400) return Math.floor(d / 3600) + " h ago";
         return Math.floor(d / 86400) + " d ago";
       },
+      fmtDate: function (epoch) {
+        epoch = Number(epoch) || 0; if (!epoch) return "";
+        var dt = new Date(epoch * 1000);
+        function p(n) { return (n < 10 ? "0" : "") + n; }
+        return p(dt.getDate()) + "." + p(dt.getMonth() + 1) + "." + dt.getFullYear();
+      },
       toggleVpn: function (val) {
         var self = this; this.busy = true; this.vpnOn = val;
         call("set_enabled", { on: val }).then(function () {
@@ -351,11 +357,21 @@
       if (!t.subsLoaded) subRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("Loading…")])];
       else if (!t.subs.length) subRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("No subscriptions yet. Add one below.")])];
       else subRows = t.subs.map(function (sb) {
+        var meta = [];
+        // traffic used / total (total 0 = unlimited) — Happ-style usage line
+        if (sb.used || sb.total) {
+          meta.push("↓ " + t.fmtBytes(sb.used) + (sb.total ? (" / " + t.fmtBytes(sb.total)) : " / ∞"));
+        }
+        if (sb.expire) meta.push("expires " + t.fmtDate(sb.expire));
+        var line2 = (sb.count || 0) + " servers · updated " + t.fmtAgo(sb.updated);
+        var kids = [
+          h("div", { style: { fontSize: "14px", fontWeight: "500", wordBreak: "break-all" } }, [t._v(sb.name || sb.id)]),
+          h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v(line2)])
+        ];
+        if (meta.length) kids.push(h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v(meta.join(" · "))]));
+        if (sb.support) kids.push(h("a", { attrs: { href: sb.support, target: "_blank" }, style: { fontSize: "12px", color: "#2f6fd8" } }, [t._v("Support")]));
         return h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: "1px solid rgba(0,0,0,0.06)" } }, [
-          h("div", { style: { minWidth: "0" } }, [
-            h("div", { style: { fontSize: "14px", fontWeight: "500", wordBreak: "break-all" } }, [t._v(sb.name || sb.id)]),
-            h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sb.count || 0) + " servers · updated " + t.fmtAgo(sb.updated))])
-          ]),
+          h("div", { style: { minWidth: "0" } }, kids),
           h("div", { style: { whiteSpace: "nowrap" } }, [
             h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.subBusy }, on: { click: function () { t.delSub(sb.id); } } }, [t._v("Remove")])
           ])
