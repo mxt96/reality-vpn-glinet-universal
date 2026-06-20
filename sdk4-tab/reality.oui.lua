@@ -172,6 +172,21 @@ function M.list_servers(args)
     return { servers = {} }
 end
 
+-- Per-server latency (Happ-style ping). Asks sing-box's Clash API to measure each
+-- outbound's real handshake delay against generate_204. Returns {pings:{tag:ms}};
+-- ms = -1 means the node failed/timed out. No flags/images — just numbers, so the
+-- installer stays tiny (mason: keep it light for the Mudi).
+function M.ping_servers(args)
+    local out = trim(sh([[R=""; for f in /etc/sing-box/servers/*.json; do [ -f "$f" ] || continue; ]] ..
+        [[t=$(basename "$f" .json); ]] ..
+        [[d=$(curl -s --max-time 5 "]] .. CLASH .. [[/proxies/$t/delay?timeout=3000&url=http://www.gstatic.com/generate_204" 2>/dev/null); ]] ..
+        [[ms=$(echo "$d" | sed -n 's/.*"delay":[ ]*\([0-9][0-9]*\).*/\1/p'); [ -z "$ms" ] && ms=-1; ]] ..
+        [[R="$R,\"$t\":$ms"; done; echo "{${R#,}}"]], 40))
+    local ok, m = pcall(cjson.decode, out)
+    if ok and type(m) == "table" then return { pings = m } end
+    return { pings = {} }
+end
+
 function M.add_server(args)
     local link = args and args.link or ""
     local name = args and args.name or ""

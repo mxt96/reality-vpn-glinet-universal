@@ -42,12 +42,14 @@
         traf: { upS: 0, downS: 0, up: 0, down: 0, conns: 0, ok: false },
         ver: { installed: "", latest: "", update: false }, verLoaded: false,
         checking: false, updating: false, updateMsg: "",
-        subs: [], subsLoaded: false, subUrl: "", subName: "", subMsg: "", subOk: false, subBusy: false, refreshingSubs: false
+        subs: [], subsLoaded: false, subUrl: "", subName: "", subMsg: "", subOk: false, subBusy: false, refreshingSubs: false,
+        pings: {}, pinging: false
       };
     },
     created: function () {
       this.refresh();
       this.loadServers();
+      this.pingServers();
       this.loadSubs();
       this.checkUpdate();
       var self = this;
@@ -80,6 +82,12 @@
           self.serversLoaded = true;
           self.servers = (r && r.servers) ? r.servers : [];
         }).catch(function () { self.serversLoaded = true; });
+      },
+      pingServers: function () {
+        var self = this; this.pinging = true;
+        return call("ping_servers").then(function (r) {
+          self.pinging = false; self.pings = (r && r.pings) ? r.pings : {};
+        }).catch(function () { self.pinging = false; });
       },
       loadSubs: function () {
         var self = this;
@@ -305,9 +313,15 @@
       else if (!t.servers.length) serverRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("No custom servers yet. Add one below.")])];
       else serverRows = t.servers.map(function (sv) {
         var isEditing = (t.editTag === sv.tag);
+        // Happ-style row: name + colored latency (no flags — keeps the installer light).
+        var pv = t.pings[sv.tag];
+        var pingTxt = (pv === undefined || pv === null) ? (t.pinging ? "…" : "—") : (pv < 0 ? "timeout" : (pv + " ms"));
+        var pingClr = (pv === undefined || pv === null) ? "#8a8f99" : (pv < 0 ? "#e5534b" : (pv < 150 ? "#10b981" : (pv < 350 ? "#e0a800" : "#e5534b")));
+        var dispName = (sv.tag || "").replace(/^srv-/, "");
         var headRow = h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: isEditing ? "none" : "1px solid rgba(0,0,0,0.06)" } }, [
-          h("div", [ h("div", { style: { fontSize: "14px", fontWeight: "500" } }, [t._v(sv.tag)]), h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sv.type || "?") + " · " + (sv.server || ""))]) ]),
-          h("div", { style: { whiteSpace: "nowrap" } }, [
+          h("div", { style: { minWidth: "0" } }, [ h("div", { style: { fontSize: "14px", fontWeight: "600", wordBreak: "break-all" } }, [t._v(dispName)]), h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sv.type || "?") + " · " + (sv.server || ""))]) ]),
+          h("div", { style: { whiteSpace: "nowrap", display: "flex", alignItems: "center" } }, [
+            h("span", { style: { fontSize: "13px", fontWeight: "600", marginRight: "10px", color: pingClr } }, [t._v(pingTxt)]),
             h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy || (t.editTag !== "" && !isEditing) }, on: { click: function () { isEditing ? t.cancelEdit() : t.startEdit(sv); } } }, [t._v(isEditing ? "Cancel" : "Edit")])
           ])
         ]);
@@ -421,7 +435,10 @@
 
         // SERVERS
         h("gl-card", [ h("div", { staticClass: "main" }, [
-          sectionTitle("Servers"),
+          h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 0 10px" } }, [
+            h("div", { style: { fontWeight: "600", fontSize: "15px" } }, [t._v("Servers")]),
+            (t.servers && t.servers.length) ? h("gl-button", { staticClass: "btn-item", attrs: { loading: t.pinging }, on: { click: function () { t.pingServers(); } } }, [t._v("Test ping")]) : null
+          ]),
           h("div", {}, serverRows),
           addBox
         ])]),
