@@ -18,8 +18,4 @@ return {
     speedtest = true,
     check_update = true,
     do_update = true,
-    get_mac = true,
-    mac_random = true,
-    mac_reset = true,
-    mac_onboot = true,
 }

@@ -250,31 +250,17 @@ set -e   # restore strict mode after best-effort swap provisioning
 
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
-         add-server.sh list-servers.sh del-server.sh import-links.sh sub-store.sh mac-tool.sh; do
+         add-server.sh list-servers.sh del-server.sh import-links.sh sub-store.sh; do
   cp "$D/$s" "$SBDIR/$s" && chmod +x "$SBDIR/$s"
 done
-# MAC-on-reboot boot hook: run the randomizer early at boot (gated by the mac-onboot flag,
-# self-heals to factory if the random MAC loses internet). Idempotent rc.local insert.
+# MAC privacy removed from the panel — GL.iNet's newer firmware has a native
+# "random MAC" setting, so ours was redundant (mason 2026-06-20). Clean up any
+# leftovers from older installs: drop the rc.local boot hook, flags and script.
 RCLM=/etc/rc.local
-[ -f "$RCLM" ] || printf '#!/bin/sh\nexit 0\n' > "$RCLM"
-if ! grep -qF "mac-tool.sh boot" "$RCLM" 2>/dev/null; then
-  if grep -q '^exit 0' "$RCLM" 2>/dev/null; then
-    awk '/^exit 0/ && !d {print "sh /etc/sing-box/mac-tool.sh boot >/dev/null 2>&1 &"; d=1} {print}' "$RCLM" > "$RCLM.tmp" && mv "$RCLM.tmp" "$RCLM"
-  else
-    echo "sh /etc/sing-box/mac-tool.sh boot >/dev/null 2>&1 &" >> "$RCLM"
-  fi
-  chmod +x "$RCLM" 2>/dev/null
-fi
-# Default-ON "random MAC on reboot" (mason's request). Do it ONCE — seed the factory MAC
-# cache FIRST (so the current real MAC is remembered as factory before any randomize),
-# then set the flag. A marker stops later upgrades from re-forcing it, so a user who turns
-# the toggle OFF stays off across updates.
-if [ ! -f "$SBDIR/.mac-onboot-defaulted" ]; then
-  sh "$SBDIR/mac-tool.sh" status >/dev/null 2>&1   # caches factory MAC
-  : > "$SBDIR/mac-onboot"
-  : > "$SBDIR/.mac-onboot-defaulted"
-  say "random-MAC-on-reboot enabled by default"
-fi
+[ -f "$RCLM" ] && grep -qF "mac-tool.sh boot" "$RCLM" 2>/dev/null && {
+  grep -vF "mac-tool.sh boot" "$RCLM" > "$RCLM.tmp" 2>/dev/null && mv "$RCLM.tmp" "$RCLM"; chmod +x "$RCLM" 2>/dev/null
+}
+rm -f "$SBDIR/mac-tool.sh" "$SBDIR/mac-onboot" "$SBDIR/.mac-onboot-defaulted" 2>/dev/null || true
 # ship empty servers dir + the README/example for reference
 cp -r "$D/servers/." "$SBDIR/servers/" 2>/dev/null || true
 # Remove ONLY the shipped reference example (rebuild.sh globs servers/*.json, so the
