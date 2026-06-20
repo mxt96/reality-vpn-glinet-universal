@@ -219,6 +219,56 @@ function M.import_links(args)
     return { ok = false, msg = "import failed" }
 end
 
+-- ---- subscriptions (Happ-style saved + auto-updating) -------------------
+-- Stored subscription URLs that the panel/cron re-pulls so the server list stays
+-- in sync (new servers added, vanished ones removed). Backed by sub-store.sh.
+local SUBSTORE = "/etc/sing-box/sub-store.sh"
+
+function M.list_subs(args)
+    local out = trim(sh("sh " .. SUBSTORE .. " list 2>/dev/null"))
+    local ok, res = pcall(cjson.decode, out)
+    if ok and type(res) == "table" then return res end
+    return { subs = {} }
+end
+
+function M.add_sub(args)
+    local url = args and args.url or ""
+    local name = args and args.name or ""
+    if url == "" then return { ok = false, msg = "Empty URL" } end
+    -- write url/name to temp files (avoids shell-quoting / injection on the URL)
+    local uf = io.open("/tmp/reality-suburl", "w")
+    if not uf then return { ok = false, msg = "io error" } end
+    uf:write(url); uf:close()
+    local nf = io.open("/tmp/reality-subname", "w")
+    if nf then nf:write(name); nf:close() end
+    local out = trim(sh("sh " .. SUBSTORE ..
+        " add \"$(cat /tmp/reality-suburl)\" \"$(cat /tmp/reality-subname 2>/dev/null)\" 2>/dev/null", 60))
+    sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
+    local ok, res = pcall(cjson.decode, out)
+    if ok and type(res) == "table" then return res end
+    return { ok = false, msg = "add failed" }
+end
+
+function M.del_sub(args)
+    local id = args and args.id or ""
+    if not id:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad id" } end
+    local out = trim(sh("sh " .. SUBSTORE .. " del " .. id .. " 2>/dev/null", 30))
+    sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
+    local ok, res = pcall(cjson.decode, out)
+    if ok and type(res) == "table" then return res end
+    return { ok = false, msg = "delete failed" }
+end
+
+function M.refresh_subs(args)
+    local id = args and args.id or "all"
+    if id ~= "all" and not id:match("^[%w][%w._%-]*$") then id = "all" end
+    local out = trim(sh("sh " .. SUBSTORE .. " refresh " .. id .. " 2>/dev/null", 60))
+    sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
+    local ok, res = pcall(cjson.decode, out)
+    if ok and type(res) == "table" then return res end
+    return { ok = false, msg = "refresh failed" }
+end
+
 function M.del_server(args)
     local tag = args and args.tag or ""
     if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end

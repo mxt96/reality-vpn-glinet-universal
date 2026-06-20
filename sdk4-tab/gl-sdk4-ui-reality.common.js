@@ -42,12 +42,14 @@
         traf: { upS: 0, downS: 0, up: 0, down: 0, conns: 0, ok: false },
         ver: { installed: "", latest: "", update: false }, verLoaded: false,
         checking: false, updating: false, updateMsg: "",
-        mac: { dev: "", current: "", factory: "", onboot: false }, macLoaded: false, macBusy: false, macMsg: ""
+        mac: { dev: "", current: "", factory: "", onboot: false }, macLoaded: false, macBusy: false, macMsg: "",
+        subs: [], subsLoaded: false, subUrl: "", subName: "", subMsg: "", subOk: false, subBusy: false, refreshingSubs: false
       };
     },
     created: function () {
       this.refresh();
       this.loadServers();
+      this.loadSubs();
       this.checkUpdate();
       this.loadMac();
       var self = this;
@@ -80,6 +82,52 @@
           self.serversLoaded = true;
           self.servers = (r && r.servers) ? r.servers : [];
         }).catch(function () { self.serversLoaded = true; });
+      },
+      loadSubs: function () {
+        var self = this;
+        return call("list_subs").then(function (r) {
+          self.subsLoaded = true;
+          self.subs = (r && r.subs) ? r.subs : [];
+        }).catch(function () { self.subsLoaded = true; });
+      },
+      addSub: function () {
+        var self = this; var url = (this.subUrl || "").trim();
+        if (!/^https?:\/\//i.test(url)) { this.subOk = false; this.subMsg = "Paste a subscription URL (https://…)"; return; }
+        this.subBusy = true; this.subMsg = "";
+        call("add_sub", { url: url, name: (this.subName || "").trim() }).then(function (r) {
+          self.subBusy = false;
+          if (r && r.ok) {
+            self.subUrl = ""; self.subName = ""; self.subOk = true;
+            self.subMsg = "Added — " + (r.added || 0) + " servers";
+            self.loadSubs(); self.loadServers();
+          } else { self.subOk = false; self.subMsg = (r && r.msg) ? r.msg : "Could not add subscription"; }
+        }).catch(function () { self.subBusy = false; self.subOk = false; self.subMsg = "Could not add subscription"; });
+      },
+      delSub: function (id) {
+        var self = this; this.subBusy = true;
+        call("del_sub", { id: id }).then(function () {
+          self.subBusy = false; self.loadSubs(); self.loadServers();
+        }).catch(function () { self.subBusy = false; self.loadSubs(); self.loadServers(); });
+      },
+      refreshSubs: function () {
+        var self = this; this.refreshingSubs = true; this.subMsg = "";
+        call("refresh_subs", { id: "all" }).then(function (r) {
+          self.refreshingSubs = false;
+          if (r && r.ok) {
+            self.subOk = true;
+            self.subMsg = "Updated — " + (r.added || 0) + " new, " + (r.removed || 0) + " removed";
+            self.loadSubs(); self.loadServers();
+          } else { self.subOk = false; self.subMsg = (r && r.msg) ? r.msg : "Refresh failed"; }
+        }).catch(function () { self.refreshingSubs = false; self.subOk = false; self.subMsg = "Refresh failed"; });
+      },
+      fmtAgo: function (epoch) {
+        epoch = Number(epoch) || 0; if (!epoch) return "never";
+        var now = Math.floor((Date.now ? Date.now() : new Date().getTime()) / 1000);
+        var d = now - epoch; if (d < 0) d = 0;
+        if (d < 60) return "just now";
+        if (d < 3600) return Math.floor(d / 60) + " min ago";
+        if (d < 86400) return Math.floor(d / 3600) + " h ago";
+        return Math.floor(d / 86400) + " d ago";
       },
       toggleVpn: function (val) {
         var self = this; this.busy = true; this.vpnOn = val;
@@ -298,11 +346,27 @@
         t.addMsg ? h("span", { style: { marginLeft: "10px", color: (t.addOk ? "#10b981" : "#e5534b"), fontSize: "13px" } }, [t._v(t.addMsg)]) : null
       ]);
 
+      // ---- subscriptions list ----
+      var subRows;
+      if (!t.subsLoaded) subRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("Loading…")])];
+      else if (!t.subs.length) subRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("No subscriptions yet. Add one below.")])];
+      else subRows = t.subs.map(function (sb) {
+        return h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: "1px solid rgba(0,0,0,0.06)" } }, [
+          h("div", { style: { minWidth: "0" } }, [
+            h("div", { style: { fontSize: "14px", fontWeight: "500", wordBreak: "break-all" } }, [t._v(sb.name || sb.id)]),
+            h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sb.count || 0) + " servers · updated " + t.fmtAgo(sb.updated))])
+          ]),
+          h("div", { style: { whiteSpace: "nowrap" } }, [
+            h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.subBusy }, on: { click: function () { t.delSub(sb.id); } } }, [t._v("Remove")])
+          ])
+        ]);
+      });
+
       // ---- speedtest ----
       var spdLine = t.spd ? h("span", { style: { marginLeft: "12px", fontWeight: "500" } }, [t._v("↓ " + t.spd.down + " · ↑ " + t.spd.up + " Mbps")]) : null;
 
       return h("div", { staticClass: "reality-wrapper" }, [
-        h("gl-title", { attrs: { title: "Reality", badge: "VPN" } }),
+        h("gl-title", { attrs: { title: "sing-box", badge: "VPN" } }),
 
         // STATUS
         h("gl-card", [ h("div", { staticClass: "main" }, [
@@ -342,6 +406,22 @@
           sectionTitle("Protocol"),
           h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap" } }, protoBtns),
           (s.mode === "auto" && s.active) ? h("div", { style: { marginTop: "10px", fontSize: "13px", color: "#8a8f99" } }, [t._v("Auto — currently using: " + (function () { var sv = (t.servers || []).filter(function (x) { return x.tag === s.active; })[0]; return sv ? srvLabel(sv) : s.active; })())]) : null
+        ])]),
+
+        // SUBSCRIPTIONS — buy on a service, paste the link, all its servers appear (auto-updated)
+        h("gl-card", [ h("div", { staticClass: "main" }, [
+          sectionTitle("Subscriptions"),
+          h("p", { style: { fontSize: "12px", color: "#8a8f99", margin: "0 0 10px" } }, [t._v("Buy a subscription on a VLESS/Reality service, paste its link here, and all of its servers appear below — auto-updated every 6 hours.")]),
+          h("div", {}, subRows),
+          h("div", { style: { marginTop: "12px" } }, [
+            h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.subUrl, placeholder: "Subscription URL (https://…)", size: "small", clearable: true }, on: { input: function (v) { t.subUrl = v; } } }),
+            h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.subName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.subName = v; } } }),
+            h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap" } }, [
+              h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.subBusy }, on: { click: function () { t.addSub(); } } }, [t._v("Add subscription")]),
+              (t.subs && t.subs.length) ? h("gl-button", { staticClass: "btn-item", style: { marginLeft: "8px" }, attrs: { loading: t.refreshingSubs }, on: { click: function () { t.refreshSubs(); } } }, [t._v("Update now")]) : null,
+              t.subMsg ? h("span", { style: { marginLeft: "10px", color: (t.subOk ? "#10b981" : "#e5534b"), fontSize: "13px" } }, [t._v(t.subMsg)]) : null
+            ])
+          ])
         ])]),
 
         // SERVERS

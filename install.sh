@@ -250,7 +250,7 @@ set -e   # restore strict mode after best-effort swap provisioning
 
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
-         add-server.sh list-servers.sh del-server.sh import-links.sh mac-tool.sh; do
+         add-server.sh list-servers.sh del-server.sh import-links.sh sub-store.sh mac-tool.sh; do
   cp "$D/$s" "$SBDIR/$s" && chmod +x "$SBDIR/$s"
 done
 # MAC-on-reboot boot hook: run the randomizer early at boot (gated by the mac-onboot flag,
@@ -362,7 +362,7 @@ fi
 # granularity is 60s, so each runs twice a minute (:00 and :30).
 CR=/etc/crontabs/root; touch "$CR"
 # drop any prior lines we own, then re-add cleanly (idempotent across upgrades)
-grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync)' "$CR" > "$CR.tmp" 2>/dev/null || true; mv "$CR.tmp" "$CR"
+grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync|sub-store)' "$CR" > "$CR.tmp" 2>/dev/null || true; mv "$CR.tmp" "$CR"
 {
   echo '*/2 * * * * /bin/sh /etc/sing-box/postup.sh'
   echo '*/5 * * * * /bin/sh /etc/sing-box/geo-refresh.sh'
@@ -370,6 +370,8 @@ grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync)' "$CR" > "$CR.tmp" 2>/d
   echo '* * * * * sleep 30; /bin/sh /etc/sing-box/watchdog.sh'
   echo '* * * * * /bin/sh /etc/sing-box/ks-sync.sh'
   echo '* * * * * sleep 30; /bin/sh /etc/sing-box/ks-sync.sh'
+  # Happ-style auto-update: re-pull every saved subscription every 6h (no-op if none)
+  echo '17 */6 * * * /bin/sh /etc/sing-box/sub-store.sh refresh all >/dev/null 2>&1'
 } >> "$CR"
 /etc/init.d/cron enable 2>/dev/null || true
 /etc/init.d/cron restart 2>/dev/null || true
