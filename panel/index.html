@@ -1158,15 +1158,8 @@
       </div>
     </div>
 
-    <!-- Protocol picker -->
-    <div class="seg-section section">
-      <div class="section-header">Protocol</div>
-      <div class="seg-control" id="seg-proto" role="group" aria-label="Protocol">
-        <button class="seg-option" data-mode="auto"        role="radio" aria-checked="false">Auto</button>
-        <button class="seg-option" data-mode="hy2-out"     role="radio" aria-checked="false">⚡ Hysteria2</button>
-        <button class="seg-option" data-mode="reality-out" role="radio" aria-checked="false">🔒 Reality</button>
-      </div>
-    </div>
+    <!-- Protocol picker removed: a server already implies its protocol.
+         Server selection (incl. "Auto") lives in the Servers section below. -->
 
     <!-- Killswitch + Server -->
     <div class="section">
@@ -1474,7 +1467,7 @@
     vpn: false,
     killswitch: false,
     mode: 'auto',
-    active: 'hy2-out',
+    active: '',
     server: '—',
     egress: '',
     country: '',
@@ -1498,19 +1491,17 @@
     });
   }
 
-  function protoLabel(mode, active) {
+  // Hero badge label: which server is in use (or "Auto" + the picked one).
+  // No protocol types — a server already carries its own protocol.
+  function serverLabel(mode, active) {
+    const clean = t => (t || '').replace(/^srv-/, '');
     if (mode === 'auto') {
-      const activeLabel = active === 'hy2-out' ? 'Hysteria2 ⚡' : 'Reality 🔒';
-      return 'Auto · ' + activeLabel;
+      const a = clean(active);
+      return (a && active !== 'direct') ? 'Auto · ' + a : 'Auto';
     }
-    if (mode === 'hy2-out') return 'Hysteria2 ⚡';
-    if (mode === 'reality-out') return 'Reality 🔒';
-    return mode;
-  }
-
-  // Determine if current mode is a "built-in" (not a user server tag)
-  function isBuiltinMode(mode) {
-    return mode === 'auto' || mode === 'hy2-out' || mode === 'reality-out';
+    // Legacy phantom modes from old installs behave as Auto on the backend.
+    if (mode === 'hy2-out' || mode === 'reality-out') return 'Auto';
+    return clean(mode) || '—';
   }
 
   function flagEmoji(country) {
@@ -1547,7 +1538,6 @@
   const vpnToggle        = document.getElementById('vpn-toggle');
   const heroBadge        = document.getElementById('hero-proto-badge');
   const heroProtoText    = document.getElementById('hero-proto-text');
-  const segProto         = document.getElementById('seg-proto');
   const ksToggle         = document.getElementById('ks-toggle');
   const speedtestRow     = document.getElementById('speedtest-row');
   const speedDetail      = document.getElementById('speed-detail');
@@ -1635,17 +1625,10 @@
     if (heroText.textContent !== wantText) heroText.textContent = wantText;
     heroText.style.color = tunneled ? 'var(--green)' : 'var(--txt2)';
 
-    // Protocol badge active only when tunneled
-    const protoStr = protoLabel(s.mode, s.active);
+    // Hero badge: active server (or "Auto"), only lit when tunneled
+    const protoStr = serverLabel(s.mode, s.active);
     if (heroProtoText.textContent !== protoStr) heroProtoText.textContent = protoStr;
     tunneled ? heroBadge.classList.add('active-badge') : heroBadge.classList.remove('active-badge');
-
-    // Segmented control
-    segProto.querySelectorAll('.seg-option').forEach(btn => {
-      const isActive = btn.dataset.mode === s.mode;
-      btn.classList.toggle('active', isActive);
-      btn.setAttribute('aria-checked', String(isActive));
-    });
 
     // Kill switch
     const ksOn = s.killswitch;
@@ -1875,16 +1858,6 @@
       .finally(() => ksToggle.classList.remove('loading'));
   }
 
-  /* ── Protocol Segmented Control ────────────────── */
-  segProto.addEventListener('click', e => {
-    const btn = e.target.closest('.seg-option');
-    if (!btn) return;
-    const mode = btn.dataset.mode;
-    if (mode === state.mode) return;
-    api('proto', { query: 'p=' + mode })
-      .then(() => fetchStatus(false))
-      .catch(() => errBanner.classList.add('show'));
-  });
 
   /* ── Speedtest ─────────────────────────────────── */
   let speedLoading = false;
@@ -1948,6 +1921,43 @@
   function renderUserServers(servers) {
     userServersList.innerHTML = '';
     serversEmpty.style.display = servers.length ? 'none' : '';
+
+    // "Auto" row — let the panel pick the best server automatically.
+    // Shown only when there is at least one server to choose from.
+    if (servers.length) {
+      const autoActive = state.mode === 'auto';
+      const arow = document.createElement('div');
+      arow.className = 'row row-tappable row-btn' + (autoActive ? ' server-row-active' : '');
+      arow.setAttribute('tabindex', '0');
+      arow.setAttribute('role', 'button');
+      arow.setAttribute('aria-label', 'Auto');
+      arow.dataset.tag = 'auto';
+      arow.innerHTML =
+        '<div class="row-icon" style="background:rgba(48,200,208,0.13);border:0.5px solid rgba(48,200,208,0.27);">' +
+          '<svg viewBox="0 0 16 16" fill="none">' +
+            '<path d="M8.5 1.5L3 9h4l-.5 5.5L13 7H9l-.5-5.5z" stroke="#30C8D0" stroke-width="1.2" stroke-linejoin="round"/>' +
+          '</svg>' +
+        '</div>' +
+        '<div class="row-content">' +
+          '<div class="row-label">Auto</div>' +
+          '<div class="row-detail">Pick the best server automatically</div>' +
+        '</div>' +
+        '<div class="row-check" style="visibility:' + (autoActive ? 'visible' : 'hidden') + '">' +
+          '<svg width="16" height="16" viewBox="0 0 16 16" fill="none">' +
+            '<path d="M3 8.5l3.5 3.5L13 5" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '</svg>' +
+        '</div>';
+      arow.addEventListener('click', () => {
+        if (state.mode === 'auto') return;
+        api('proto', { query: 'p=auto' })
+          .then(() => fetchStatus(false))
+          .catch(() => errBanner.classList.add('show'));
+      });
+      arow.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); arow.click(); }
+      });
+      userServersList.appendChild(arow);
+    }
     servers.forEach(srv => {
       const isActive = isServerActive(srv.tag);
       const row = document.createElement('div');
@@ -1957,8 +1967,8 @@
       row.setAttribute('aria-label', srv.tag);
       row.dataset.tag = srv.tag;
 
-      // Type badge color
-      const typeColor = srv.type === 'hysteria2' ? '#FF9F0A' : '#5E5CE6';
+      // Uniform icon color — no protocol-type hint (a server carries its own protocol)
+      const typeColor = '#5E5CE6';
 
       row.innerHTML =
         '<div class="row-icon" style="background:' + typeColor + '22;border:0.5px solid ' + typeColor + '44;">' +
