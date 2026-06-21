@@ -22,12 +22,6 @@
     });
   }
 
-  var PROTOS = [
-    { key: "auto",        label: "Auto" },
-    { key: "hy2-out",     label: "Hysteria2" },
-    { key: "reality-out", label: "Reality" }
-  ];
-
   return {
     name: "realityview",
     data: function () {
@@ -43,7 +37,8 @@
         ver: { installed: "", latest: "", update: false }, verLoaded: false,
         checking: false, updating: false, updateMsg: "",
         subs: [], subsLoaded: false, subUrl: "", subName: "", subMsg: "", subOk: false, subBusy: false, refreshingSubs: false,
-        pings: {}, pinging: false
+        pings: {}, pinging: false,
+        protoFilter: "all"        // All | reality | hysteria2 — filters the server list + Auto pool
       };
     },
     created: function () {
@@ -159,6 +154,16 @@
         call("set_proto", { proto: key }).then(function () {
           setTimeout(function () { self.busy = false; self.refresh(); }, 2500);
         }).catch(function () { self.busy = false; self.refresh(); });
+      },
+      autoTagForFilter: function () {
+        return this.protoFilter === "reality" ? "auto-reality"
+             : this.protoFilter === "hysteria2" ? "auto-hy2" : "auto";
+      },
+      setFilter: function (f) {
+        this.protoFilter = f;
+        // When currently on Auto, re-point it to this protocol's pool live.
+        var m = this.st && this.st.mode;
+        if (m === "auto" || m === "auto-reality" || m === "auto-hy2") this.setProto(this.autoTagForFilter());
       },
       addServer: function () {
         var self = this; var raw = (this.addLink || "").trim();
@@ -278,7 +283,6 @@
       var loc = [s.city, s.country].filter(Boolean).join(", ");
       var pingTxt = s.ping ? (s.ping + " ms") : "";
       var pingColor = !s.ping ? {} : { color: (Number(s.ping) < 150 ? "#10b981" : (Number(s.ping) < 350 ? "#e0a800" : "#e5534b")) };
-      var activeProto = s.mode === "auto" ? "auto" : s.mode;
 
       // ---- toggle row helper (label + gl-switch) ----
       function toggleRow(label, sub, val, handler) {
@@ -288,55 +292,85 @@
         ]);
       }
 
-      // ---- protocol segmented control (dynamic: Auto + one per server in the list) ----
+      // ---- protocol filter: 3 FIXED options (All / Reality / Hysteria2) ----
+      // Filters the server list + the Auto pool. NOT one button per server.
       function srvLabel(sv) {
         if (sv.type === "vless") return "Reality";
         if (sv.type === "hysteria2") return "Hysteria2";
         return (sv.tag || "").replace(/^srv-/, "") || sv.tag;
       }
-      var protoItems = [{ key: "auto", label: "Auto" }].concat(
-        (t.servers || []).map(function (sv) { return { key: sv.tag, label: srvLabel(sv) }; })
-      );
-      var protoBtns = protoItems.map(function (p) {
-        var isActive = (s.mode === p.key);
+      var FILTERS = [
+        { key: "all",       label: "All" },
+        { key: "reality",   label: "🔒 Reality" },
+        { key: "hysteria2", label: "⚡ Hysteria2" }
+      ];
+      var filterBtns = FILTERS.map(function (p) {
+        var on = (t.protoFilter === p.key);
         return h("gl-button", {
           staticClass: "btn-item",
           style: { marginRight: "8px", marginBottom: "8px" },
-          attrs: { type: isActive ? "primary" : "default", disabled: t.busy },
-          on: { click: function () { t.setProto(p.key); } }
+          attrs: { type: on ? "primary" : "default", disabled: t.busy },
+          on: { click: function () { t.setFilter(p.key); } }
         }, [t._v(p.label)]);
       });
+      // server filtering + active-state helpers
+      var FILT_TYPE = { reality: "vless", hysteria2: "hysteria2" };
+      var wantType = FILT_TYPE[t.protoFilter];
+      var autoTag = t.protoFilter === "reality" ? "auto-reality" : t.protoFilter === "hysteria2" ? "auto-hy2" : "auto";
+      function isAutoMode(m) { return m === "auto" || m === "auto-reality" || m === "auto-hy2"; }
+      function srvActive(tag) { return s.mode === tag || (isAutoMode(s.mode) && s.active === tag); }
 
-      // ---- servers list ----
+      // ---- servers list (filtered by protocol) + an "Auto" row; tap a server to connect ----
+      var fservers = wantType ? (t.servers || []).filter(function (sv) { return sv.type === wantType; }) : (t.servers || []);
       var serverRows;
       if (!t.serversLoaded) serverRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("Loading…")])];
       else if (!t.servers.length) serverRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("No custom servers yet. Add one below.")])];
-      else serverRows = t.servers.map(function (sv) {
-        var isEditing = (t.editTag === sv.tag);
-        // Happ-style row: name + colored latency (no flags — keeps the installer light).
-        var pv = t.pings[sv.tag];
-        var pingTxt = (pv === undefined || pv === null) ? (t.pinging ? "…" : "—") : (pv < 0 ? "timeout" : (pv + " ms"));
-        var pingClr = (pv === undefined || pv === null) ? "#8a8f99" : (pv < 0 ? "#e5534b" : (pv < 150 ? "#10b981" : (pv < 350 ? "#e0a800" : "#e5534b")));
-        var dispName = (sv.tag || "").replace(/^srv-/, "");
-        var headRow = h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: isEditing ? "none" : "1px solid rgba(0,0,0,0.06)" } }, [
-          h("div", { style: { minWidth: "0" } }, [ h("div", { style: { fontSize: "14px", fontWeight: "600", wordBreak: "break-all" } }, [t._v(dispName)]), h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sv.type || "?") + " · " + (sv.server || ""))]) ]),
-          h("div", { style: { whiteSpace: "nowrap", display: "flex", alignItems: "center" } }, [
-            h("span", { style: { fontSize: "13px", fontWeight: "600", marginRight: "10px", color: pingClr } }, [t._v(pingTxt)]),
-            h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy || (t.editTag !== "" && !isEditing) }, on: { click: function () { isEditing ? t.cancelEdit() : t.startEdit(sv); } } }, [t._v(isEditing ? "Cancel" : "Edit")])
-          ])
-        ]);
-        if (!isEditing) return headRow;
-        var editBox = h("div", { style: { padding: "4px 2px 12px", borderBottom: "1px solid rgba(0,0,0,0.06)" } }, [
-          h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.editLink, placeholder: "New vless://… or hysteria2://… link", size: "small", clearable: true }, on: { input: function (v) { t.editLink = v; } } }),
-          h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.editName, placeholder: "Name", size: "small" }, on: { input: function (v) { t.editName = v; } } }),
-          h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } }, [
-            h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.editing }, on: { click: function () { t.saveEdit(); } } }, [t._v("Save")]),
-            h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.busy }, on: { click: function () { t.delServer(sv.tag); } } }, [t._v("Delete")])
-          ]),
-          t.editMsg ? h("span", { style: { marginLeft: "10px", color: "#e5534b", fontSize: "13px" } }, [t._v(t.editMsg)]) : null
-        ]);
-        return h("div", {}, [headRow, editBox]);
-      });
+      else {
+        serverRows = [];
+        // "Auto" row — best server within the current protocol filter
+        if (fservers.length) {
+          var autoOn = (s.mode === autoTag);
+          serverRows.push(h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: "1px solid rgba(0,0,0,0.06)", cursor: "pointer" }, on: { click: function () { if (!t.busy && s.mode !== autoTag) t.setProto(autoTag); } } }, [
+            h("div", { style: { minWidth: "0" } }, [
+              h("div", { style: { fontSize: "14px", fontWeight: "600", color: autoOn ? "#2f6fd8" : "#1f2733" } }, [t._v((autoOn ? "✓ " : "") + "Auto")]),
+              h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v("Best server automatically")])
+            ]),
+            autoOn ? h("span", { style: { color: "#2f6fd8", fontWeight: "700", fontSize: "15px" } }, [t._v("●")]) : null
+          ]));
+        } else {
+          serverRows.push(h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("No " + t.protoFilter + " servers — switch the Protocol filter above.")]));
+        }
+        // each (filtered) server — tap the name to connect, Edit/Delete on the right
+        fservers.forEach(function (sv) {
+          var isEditing = (t.editTag === sv.tag);
+          var pv = t.pings[sv.tag];
+          var pingTxt = (pv === undefined || pv === null) ? (t.pinging ? "…" : "—") : (pv < 0 ? "timeout" : (pv + " ms"));
+          var pingClr = (pv === undefined || pv === null) ? "#8a8f99" : (pv < 0 ? "#e5534b" : (pv < 150 ? "#10b981" : (pv < 350 ? "#e0a800" : "#e5534b")));
+          var dispName = (sv.tag || "").replace(/^srv-/, "");
+          var on = srvActive(sv.tag);
+          var headRow = h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: isEditing ? "none" : "1px solid rgba(0,0,0,0.06)" } }, [
+            h("div", { style: { minWidth: "0", flex: "1", cursor: "pointer" }, on: { click: function () { if (!t.busy && s.mode !== sv.tag) t.setProto(sv.tag); } } }, [
+              h("div", { style: { fontSize: "14px", fontWeight: "600", wordBreak: "break-all", color: on ? "#2f6fd8" : "#1f2733" } }, [t._v((on ? "✓ " : "") + dispName)]),
+              h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sv.type || "?") + " · " + (sv.server || ""))])
+            ]),
+            h("div", { style: { whiteSpace: "nowrap", display: "flex", alignItems: "center" } }, [
+              h("span", { style: { fontSize: "13px", fontWeight: "600", marginRight: "10px", color: pingClr } }, [t._v(pingTxt)]),
+              h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy || (t.editTag !== "" && !isEditing) }, on: { click: function () { isEditing ? t.cancelEdit() : t.startEdit(sv); } } }, [t._v(isEditing ? "Cancel" : "Edit")])
+            ])
+          ]);
+          if (!isEditing) { serverRows.push(headRow); return; }
+          var editBox = h("div", { style: { padding: "4px 2px 12px", borderBottom: "1px solid rgba(0,0,0,0.06)" } }, [
+            h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.editLink, placeholder: "New vless://… or hysteria2://… link", size: "small", clearable: true }, on: { input: function (v) { t.editLink = v; } } }),
+            h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.editName, placeholder: "Name", size: "small" }, on: { input: function (v) { t.editName = v; } } }),
+            h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } }, [
+              h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.editing }, on: { click: function () { t.saveEdit(); } } }, [t._v("Save")]),
+              h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.busy }, on: { click: function () { t.delServer(sv.tag); } } }, [t._v("Delete")])
+            ]),
+            t.editMsg ? h("span", { style: { marginLeft: "10px", color: "#e5534b", fontSize: "13px" } }, [t._v(t.editMsg)]) : null
+          ]);
+          serverRows.push(h("div", {}, [headRow, editBox]));
+        });
+      }
 
       var addBox = h("div", { style: { marginTop: "12px" } }, [
         h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.addLink, type: "textarea", rows: 4, placeholder: "One link, OR many (one per line), OR a subscription URL / base64", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
@@ -413,8 +447,9 @@
         // PROTOCOL
         h("gl-card", [ h("div", { staticClass: "main" }, [
           sectionTitle("Protocol"),
-          h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap" } }, protoBtns),
-          (s.mode === "auto" && s.active) ? h("div", { style: { marginTop: "10px", fontSize: "13px", color: "#8a8f99" } }, [t._v("Auto — currently using: " + (function () { var sv = (t.servers || []).filter(function (x) { return x.tag === s.active; })[0]; return sv ? srvLabel(sv) : s.active; })())]) : null
+          h("div", { style: { fontSize: "12px", color: "#8a8f99", margin: "0 0 10px" } }, [t._v("Filters the server list below and which servers Auto picks among.")]),
+          h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap" } }, filterBtns),
+          (isAutoMode(s.mode) && s.active) ? h("div", { style: { marginTop: "10px", fontSize: "13px", color: "#8a8f99" } }, [t._v("Auto — currently using: " + (function () { var sv = (t.servers || []).filter(function (x) { return x.tag === s.active; })[0]; return sv ? (srvLabel(sv) + " · " + (sv.tag || "").replace(/^srv-/, "")) : s.active; })())]) : null
         ])]),
 
         // SUBSCRIPTIONS — buy on a service, paste the link, all its servers appear (auto-updated)

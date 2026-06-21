@@ -50,10 +50,16 @@ case "$ACT" in
   ks_on) ks_on;;
   ks_off) ks_off;;
   proto) P=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p')
-      # Only "auto" or a real server tag are selectable outbounds. Legacy/phantom
-      # names (hy2-out, reality-out) have no matching outbound -> selecting them
-      # blackholes traffic and, with killswitch on, kills internet. Fall back to auto.
-      [ "$P" = auto ] || { [ -n "$P" ] && [ -f "/etc/sing-box/servers/$P.json" ]; } || P=auto
+      # Selectable outbounds: "auto" (all servers), the protocol-filtered "auto-reality"
+      # / "auto-hy2" groups (rebuild.sh builds them only when servers of that family
+      # exist), or a real server tag. Anything else (legacy phantoms hy2-out/reality-out)
+      # has no matching outbound -> coerce to "auto" so a bad pick can never blackhole
+      # traffic / kill the LAN with killswitch on.
+      case "$P" in
+        auto) ;;
+        auto-reality|auto-hy2) grep -q "\"tag\": \"$P\"" /etc/sing-box/reality_full.json 2>/dev/null || P=auto ;;
+        *) { [ -n "$P" ] && [ -f "/etc/sing-box/servers/$P.json" ]; } || P=auto ;;
+      esac
       curl -s --max-time 4 -X PUT "$API/proxies/select" -d "{\"name\":\"$P\"}" >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
   setpass) NP=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
     if [ -n "$NP" ] && [ "${#NP}" -ge 6 ]; then printf 'root:%s\n' "$NP" | chpasswd >/dev/null 2>&1; emit; echo '{"ok":true,"msg":"Password changed"}'; else emit; echo '{"ok":false,"msg":"At least 6 characters"}'; fi

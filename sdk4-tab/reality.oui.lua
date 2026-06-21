@@ -77,7 +77,7 @@ function M.get_status(args)
     local ks  = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_desired && echo true || echo false"))
     local sel = now_of("select")
     local active = sel
-    if sel == "auto" then active = now_of("auto") end
+    if sel == "auto" or sel == "auto-reality" or sel == "auto-hy2" then active = now_of(sel) end
     local geo = trim(sh("cat /tmp/lk-geo 2>/dev/null"))
     if geo == "" then sh("(/etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1") end
     local srvjson = ""
@@ -115,7 +115,13 @@ function M.set_proto(args)
     -- so selecting them blackholes traffic and, with killswitch on, kills internet.
     -- Validate against the live servers dir; fall back to "auto" so we never select
     -- a non-existent node.
-    if p ~= "auto" then
+    if p == "auto-reality" or p == "auto-hy2" then
+        -- protocol-filtered auto groups: rebuild.sh builds them only when servers of
+        -- that family exist. Fall back to plain "auto" if the group isn't in the config.
+        if trim(sh("grep -q '\"tag\": \"" .. p .. "\"' /etc/sing-box/reality_full.json 2>/dev/null && echo y || echo n")) ~= "y" then
+            p = "auto"
+        end
+    elseif p ~= "auto" then
         if not p:match("^[%w][%w._%-]*$") then
             p = "auto"
         elseif trim(sh("[ -f /etc/sing-box/servers/" .. p .. ".json ] && echo y || echo n")) ~= "y" then

@@ -15,13 +15,19 @@ CFG="$SBDIR/reality_full.json"
 SB="$SBDIR/sing-box"
 [ -x "$SB" ] || SB=$(command -v sing-box || echo "$SB")
 mkdir -p "$SRVDIR"
-SRV_OUT=""; SRV_TAGS=""; N=0
+SRV_OUT=""; SRV_TAGS=""; REA_TAGS=""; HY2_TAGS=""; N=0
 for f in "$SRVDIR"/*.json; do
   [ -f "$f" ] || continue
   t=$(basename "$f" .json)
+  ty=$(sed -n 's/.*"type": *"\([a-z0-9]*\)".*/\1/p' "$f" | head -1)
   SRV_OUT="$SRV_OUT,
 $(cat "$f")"
   SRV_TAGS="$SRV_TAGS,\"$t\""
+  # bucket by protocol family so "auto" can be filtered (Reality = vless, Hysteria2)
+  case "$ty" in
+    hysteria2) HY2_TAGS="$HY2_TAGS,\"$t\"" ;;
+    vless)     REA_TAGS="$REA_TAGS,\"$t\"" ;;
+  esac
   N=$((N+1))
 done
 cp -f "$CFG" "$CFG.bak" 2>/dev/null
@@ -31,9 +37,23 @@ if [ "$N" -eq 0 ]; then
   FINAL="direct"
 else
   SRV_TAGS_CLEAN=${SRV_TAGS#,}
+  # Protocol-filtered "auto" groups — built ONLY when ≥1 server of that family exists
+  # (an empty urltest is invalid). They let the panel's Protocol filter pick the best
+  # server within one protocol. select lists them so they're switchable.
+  FILT_OUT=""; SEL_EXTRA=""
+  if [ -n "$REA_TAGS" ]; then
+    FILT_OUT="$FILT_OUT,
+    { \"type\": \"urltest\", \"tag\": \"auto-reality\", \"outbounds\": [${REA_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }"
+    SEL_EXTRA="$SEL_EXTRA,\"auto-reality\""
+  fi
+  if [ -n "$HY2_TAGS" ]; then
+    FILT_OUT="$FILT_OUT,
+    { \"type\": \"urltest\", \"tag\": \"auto-hy2\", \"outbounds\": [${HY2_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }"
+    SEL_EXTRA="$SEL_EXTRA,\"auto-hy2\""
+  fi
   OUTBOUNDS="${SRV_OUT#,},
-    { \"type\": \"urltest\", \"tag\": \"auto\", \"outbounds\": [${SRV_TAGS_CLEAN}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 },
-    { \"type\": \"selector\", \"tag\": \"select\", \"outbounds\": [\"auto\"${SRV_TAGS}], \"default\": \"auto\" },
+    { \"type\": \"urltest\", \"tag\": \"auto\", \"outbounds\": [${SRV_TAGS_CLEAN}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }${FILT_OUT},
+    { \"type\": \"selector\", \"tag\": \"select\", \"outbounds\": [\"auto\"${SEL_EXTRA}${SRV_TAGS}], \"default\": \"auto\" },
     { \"type\": \"direct\", \"tag\": \"direct\" }"
   FINAL="select"
 fi

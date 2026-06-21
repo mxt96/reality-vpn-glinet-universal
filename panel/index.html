@@ -1158,8 +1158,16 @@
       </div>
     </div>
 
-    <!-- Protocol picker removed: a server already implies its protocol.
-         Server selection (incl. "Auto") lives in the Servers section below. -->
+    <!-- Protocol filter: narrows the server list + the Auto pool to one protocol.
+         Not a separate outbound — it filters which servers Auto chooses among. -->
+    <div class="seg-section section">
+      <div class="section-header">Protocol</div>
+      <div class="seg-control" id="seg-filter" role="group" aria-label="Protocol filter">
+        <button class="seg-option active" data-filter="all"       role="radio" aria-checked="true">All</button>
+        <button class="seg-option"        data-filter="reality"   role="radio" aria-checked="false">🔒 Reality</button>
+        <button class="seg-option"        data-filter="hysteria2" role="radio" aria-checked="false">⚡ Hysteria2</button>
+      </div>
+    </div>
 
     <!-- Killswitch + Server -->
     <div class="section">
@@ -1495,7 +1503,7 @@
   // No protocol types — a server already carries its own protocol.
   function serverLabel(mode, active) {
     const clean = t => (t || '').replace(/^srv-/, '');
-    if (mode === 'auto') {
+    if (mode === 'auto' || mode === 'auto-reality' || mode === 'auto-hy2') {
       const a = clean(active);
       return (a && active !== 'direct') ? 'Auto · ' + a : 'Auto';
     }
@@ -1547,6 +1555,37 @@
   const speedChevron     = document.getElementById('speed-chevron');
   const serversEmpty     = document.getElementById('servers-empty');
   const userServersList  = document.getElementById('user-servers-list');
+
+  /* ── Protocol filter (All / Reality / Hysteria2) ──────────────────
+     Filters the server list AND the Auto pool. Not an outbound itself:
+     'all' -> auto, 'reality' -> auto-reality (vless), 'hysteria2' -> auto-hy2. */
+  const segFilter = document.getElementById('seg-filter');
+  const FILTER_TYPE = { reality: 'vless', hysteria2: 'hysteria2' };   // filter -> server.type
+  const FILTER_AUTO = { all: 'auto', reality: 'auto-reality', hysteria2: 'auto-hy2' };
+  let protoFilter = (function () { try { return localStorage.getItem('protoFilter') || 'all'; } catch (e) { return 'all'; } })();
+  function autoTagForFilter() { return FILTER_AUTO[protoFilter] || 'auto'; }
+  function syncFilterButtons() {
+    segFilter.querySelectorAll('.seg-option').forEach(b => {
+      const on = b.dataset.filter === protoFilter;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+  syncFilterButtons();
+  segFilter.addEventListener('click', e => {
+    const btn = e.target.closest('.seg-option');
+    if (!btn) return;
+    protoFilter = btn.dataset.filter;
+    try { localStorage.setItem('protoFilter', protoFilter); } catch (e) {}
+    syncFilterButtons();
+    fetchUserServers();                       // re-render the list, filtered
+    // If we're currently on Auto, re-point Auto to this protocol's pool live.
+    if (isAutoMode()) {
+      api('proto', { query: 'p=' + autoTagForFilter() })
+        .then(() => fetchStatus(false))
+        .catch(() => errBanner.classList.add('show'));
+    }
+  });
   const addserverRow     = document.getElementById('addserver-row');
   const chpassRow        = document.getElementById('chpass-row');
   const verInstalled     = document.getElementById('ver-installed');
@@ -1897,8 +1936,9 @@
   /* ── User Servers List ─────────────────────────── */
   // A server tag is "active" if it's explicitly selected, or it's the
   // server the "auto" group currently resolved to.
+  function isAutoMode(m) { m = m || state.mode; return m === 'auto' || m === 'auto-reality' || m === 'auto-hy2'; }
   function isServerActive(tag) {
-    return state.mode === tag || (state.mode === 'auto' && state.active === tag);
+    return state.mode === tag || (isAutoMode() && state.active === tag);
   }
 
   // Re-evaluate the active checkmark on already-rendered rows (called on every
@@ -1921,17 +1961,21 @@
   function renderUserServers(servers) {
     userServersList.innerHTML = '';
     serversEmpty.style.display = servers.length ? 'none' : '';
+    // Apply the protocol filter ('all' = everything; else match server.type)
+    const wantType = FILTER_TYPE[protoFilter];
+    const shown = wantType ? servers.filter(s => s.type === wantType) : servers;
+    const autoTag = autoTagForFilter();
 
-    // "Auto" row — let the panel pick the best server automatically.
-    // Shown only when there is at least one server to choose from.
-    if (servers.length) {
-      const autoActive = state.mode === 'auto';
+    // "Auto" row — best server WITHIN the current protocol filter.
+    // Shown only when at least one matching server exists.
+    if (shown.length) {
+      const autoActive = state.mode === autoTag;
       const arow = document.createElement('div');
       arow.className = 'row row-tappable row-btn' + (autoActive ? ' server-row-active' : '');
       arow.setAttribute('tabindex', '0');
       arow.setAttribute('role', 'button');
       arow.setAttribute('aria-label', 'Auto');
-      arow.dataset.tag = 'auto';
+      arow.dataset.tag = autoTag;
       arow.innerHTML =
         '<div class="row-icon" style="background:rgba(48,200,208,0.13);border:0.5px solid rgba(48,200,208,0.27);">' +
           '<svg viewBox="0 0 16 16" fill="none">' +
@@ -1948,8 +1992,8 @@
           '</svg>' +
         '</div>';
       arow.addEventListener('click', () => {
-        if (state.mode === 'auto') return;
-        api('proto', { query: 'p=auto' })
+        if (state.mode === autoTag) return;
+        api('proto', { query: 'p=' + autoTag })
           .then(() => fetchStatus(false))
           .catch(() => errBanner.classList.add('show'));
       });
@@ -1958,7 +2002,7 @@
       });
       userServersList.appendChild(arow);
     }
-    servers.forEach(srv => {
+    shown.forEach(srv => {
       const isActive = isServerActive(srv.tag);
       const row = document.createElement('div');
       row.className = 'row row-tappable row-btn' + (isActive ? ' server-row-active' : '');
