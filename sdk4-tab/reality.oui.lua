@@ -115,7 +115,7 @@ function M.set_proto(args)
     -- so selecting them blackholes traffic and, with killswitch on, kills internet.
     -- Validate against the live servers dir; fall back to "auto" so we never select
     -- a non-existent node.
-    if p == "auto-reality" or p == "auto-hy2" then
+    if p == "auto-reality" or p == "auto-hy2" or p == "auto-fav" then
         -- protocol-filtered auto groups: rebuild.sh builds them only when servers of
         -- that family exist. Fall back to plain "auto" if the group isn't in the config.
         if trim(sh("grep -q '\"tag\": \"" .. p .. "\"' /etc/sing-box/reality_full.json 2>/dev/null && echo y || echo n")) ~= "y" then
@@ -169,13 +169,36 @@ end
 
 -- ---- servers ------------------------------------------------------------
 function M.list_servers(args)
-    local out = trim(sh([[L=""; for f in /etc/sing-box/servers/*.json; do [ -f "$f" ] || continue; ]] ..
+    local out = trim(sh([[L=""; FAVF=/etc/sing-box/favorites; for f in /etc/sing-box/servers/*.json; do [ -f "$f" ] || continue; ]] ..
         [[t=$(basename "$f" .json); ty=$(sed -n 's/.*"type": *"\([a-z0-9]*\)".*/\1/p' "$f"|head -1); ]] ..
         [[sv=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "$f"|head -1); ]] ..
-        [[L="$L,{\"tag\":\"$t\",\"type\":\"$ty\",\"server\":\"$sv\"}"; done; echo "[${L#,}]"]]))
+        [[fv=false; [ -f "$FAVF" ] && grep -qxF "$t" "$FAVF" && fv=true; ]] ..
+        [[L="$L,{\"tag\":\"$t\",\"type\":\"$ty\",\"server\":\"$sv\",\"fav\":$fv}"; done; echo "[${L#,}]"]]))
     local ok, arr = pcall(cjson.decode, out)
     if ok and type(arr) == "table" then return { servers = arr } end
     return { servers = {} }
+end
+
+-- ---- favorites: star servers; "Auto ★" urltests ONLY these --------------
+function M.get_fav(args)
+    local out = trim(sh("[ -f /etc/sing-box/favorites ] && grep -v '^$' /etc/sing-box/favorites || true"))
+    local list = {}
+    for line in out:gmatch("[^\r\n]+") do list[#list+1] = line end
+    return { fav = list }
+end
+
+function M.set_fav(args)
+    local tag = args and args.tag or ""
+    local on = args and (args.on == true or args.on == "true" or args.on == 1 or args.on == "1")
+    if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end
+    if on then
+        sh("touch /etc/sing-box/favorites; grep -qxF '" .. tag .. "' /etc/sing-box/favorites || echo '" .. tag .. "' >> /etc/sing-box/favorites")
+    else
+        sh("[ -f /etc/sing-box/favorites ] && grep -vxF '" .. tag .. "' /etc/sing-box/favorites > /etc/sing-box/favorites.tmp 2>/dev/null && mv /etc/sing-box/favorites.tmp /etc/sing-box/favorites")
+    end
+    -- rebuild so the auto-fav urltest pool reflects the change; reload sing-box if running
+    sh("sh /etc/sing-box/rebuild.sh >/dev/null 2>&1; [ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = 1 ] && /etc/init.d/sing-box restart >/dev/null 2>&1", 20)
+    return { ok = true }
 end
 
 -- Per-server latency (Happ-style ping). Asks sing-box's Clash API to measure each

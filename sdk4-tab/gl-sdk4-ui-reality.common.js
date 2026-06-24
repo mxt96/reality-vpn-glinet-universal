@@ -199,6 +199,13 @@
           self.busy = false; self.cancelEdit(); self.loadServers();
         }).catch(function () { self.busy = false; self.cancelEdit(); self.loadServers(); });
       },
+      setFav: function (sv) {
+        // Toggle ★ on a server. Backend writes /etc/sing-box/favorites + rebuilds the
+        // "auto-fav" urltest pool. Optimistic UI; reload to reflect the rebuilt list.
+        var self = this; var newOn = !sv.fav; sv.fav = newOn;
+        call("set_fav", { tag: sv.tag, on: newOn ? 1 : 0 }).then(function () { self.loadServers(); })
+          .catch(function () { sv.fav = !newOn; });
+      },
       startEdit: function (sv) {
         this.editTag = sv.tag;
         this.editLink = "";
@@ -337,6 +344,17 @@
             ]),
             autoOn ? h("span", { style: { color: "#2f6fd8", fontWeight: "700", fontSize: "15px" } }, [t._v("●")]) : null
           ]));
+          // "Auto ★" row — best among ONLY the starred servers (shown when ≥1 favorite exists)
+          if ((t.servers || []).some(function (x) { return x.fav; })) {
+            var favOn = (s.mode === "auto-fav");
+            serverRows.push(h("div", { staticClass: "r-row", style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 2px", borderBottom: "1px solid rgba(0,0,0,0.06)", cursor: "pointer" }, on: { click: function () { if (!t.busy && s.mode !== "auto-fav") t.setProto("auto-fav"); } } }, [
+              h("div", { style: { minWidth: "0" } }, [
+                h("div", { style: { fontSize: "14px", fontWeight: "600", color: favOn ? "#2f6fd8" : "#1f2733" } }, [t._v((favOn ? "✓ " : "") + "Auto ★ (избранное)")]),
+                h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v("Лучший среди отмеченных ★")])
+              ]),
+              favOn ? h("span", { style: { color: "#2f6fd8", fontWeight: "700", fontSize: "15px" } }, [t._v("●")]) : null
+            ]));
+          }
         } else {
           serverRows.push(h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("No " + t.protoFilter + " servers — switch the Protocol filter above.")]));
         }
@@ -354,6 +372,7 @@
               h("div", { style: { fontSize: "12px", color: "#8a8f99" } }, [t._v((sv.type || "?") + " · " + (sv.server || ""))])
             ]),
             h("div", { style: { whiteSpace: "nowrap", display: "flex", alignItems: "center" } }, [
+              h("span", { attrs: { title: "В избранное (Auto ★ выбирает лучший среди отмеченных)" }, style: { cursor: "pointer", fontSize: "17px", marginRight: "10px", lineHeight: "1", color: sv.fav ? "#e0a800" : "#c5c9d0" }, on: { click: function () { if (!t.busy) t.setFav(sv); } } }, [t._v(sv.fav ? "★" : "☆")]),
               h("span", { style: { fontSize: "13px", fontWeight: "600", marginRight: "10px", color: pingClr } }, [t._v(pingTxt)]),
               h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy || (t.editTag !== "" && !isEditing) }, on: { click: function () { isEditing ? t.cancelEdit() : t.startEdit(sv); } } }, [t._v(isEditing ? "Cancel" : "Edit")])
             ])

@@ -7,6 +7,8 @@ return {
     set_enabled = true,
     set_killswitch = true,
     list_servers = true,
+    get_fav = true,
+    set_fav = true,
     ping_servers = true,
     add_server = true,
     import_links = true,

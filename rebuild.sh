@@ -51,6 +51,18 @@ else
     { \"type\": \"urltest\", \"tag\": \"auto-hy2\", \"outbounds\": [${HY2_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }"
     SEL_EXTRA="$SEL_EXTRA,\"auto-hy2\""
   fi
+  # Favorites pool — urltest over user-starred servers (file /etc/sing-box/favorites,
+  # one tag per line). "Auto ★" picks the best among ONLY the servers mason marked,
+  # not all 90+ from a subscription. Built only when ≥1 favorite still exists.
+  FAV_TAGS=""
+  if [ -f /etc/sing-box/favorites ]; then
+    while IFS= read -r ft; do [ -z "$ft" ] && continue; [ -f "/etc/sing-box/servers/$ft.json" ] && FAV_TAGS="$FAV_TAGS,\"$ft\""; done < /etc/sing-box/favorites
+  fi
+  if [ -n "$FAV_TAGS" ]; then
+    FILT_OUT="$FILT_OUT,
+    { \"type\": \"urltest\", \"tag\": \"auto-fav\", \"outbounds\": [${FAV_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }"
+    SEL_EXTRA="$SEL_EXTRA,\"auto-fav\""
+  fi
   OUTBOUNDS="${SRV_OUT#,},
     { \"type\": \"urltest\", \"tag\": \"auto\", \"outbounds\": [${SRV_TAGS_CLEAN}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }${FILT_OUT},
     { \"type\": \"selector\", \"tag\": \"select\", \"outbounds\": [\"auto\"${SEL_EXTRA}${SRV_TAGS}], \"default\": \"auto\" },
