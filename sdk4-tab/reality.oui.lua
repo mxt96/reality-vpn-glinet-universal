@@ -201,6 +201,29 @@ function M.set_fav(args)
     return { ok = true }
 end
 
+-- Bulk star/unstar — set the whole "Auto ★" pool from the UI's filtered set in ONE
+-- shot (e.g. "★ all shown" after a search/protocol filter). Writes favorites once and
+-- rebuilds once, instead of N rebuilds — essential with 100+ subscription servers.
+function M.set_fav_bulk(args)
+    local tags = args and args.tags or {}
+    local on = args and (args.on == true or args.on == "true" or args.on == 1 or args.on == "1")
+    if type(tags) ~= "table" then return { ok = false, msg = "bad tags" } end
+    local clean = {}
+    for _, tg in ipairs(tags) do
+        if type(tg) == "string" and tg:match("^[%w][%w._%-]*$") then clean[#clean + 1] = tg end
+    end
+    if #clean == 0 then return { ok = false, msg = "no valid tags" } end
+    -- tags are filename-safe (alnum . _ -) so they're safe to pass unquoted into sh.
+    local list = table.concat(clean, " ")
+    sh("F=/etc/sing-box/favorites; touch \"$F\"; T=/tmp/fav-batch.$$; : > \"$T\"; for x in " .. list ..
+       "; do echo \"$x\" >> \"$T\"; done; " ..
+       (on and "sort -u \"$F\" \"$T\" -o \"$F\""
+            or "grep -vxF -f \"$T\" \"$F\" > \"$F.tmp\" 2>/dev/null && mv \"$F.tmp\" \"$F\""
+       ) .. "; rm -f \"$T\"")
+    sh("sh /etc/sing-box/rebuild.sh >/dev/null 2>&1; [ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = 1 ] && /etc/init.d/sing-box restart >/dev/null 2>&1", 25)
+    return { ok = true, n = #clean }
+end
+
 -- Per-server latency (Happ-style ping). Asks sing-box's Clash API to measure each
 -- outbound's real handshake delay against generate_204. Returns {pings:{tag:ms}};
 -- ms = -1 means the node failed/timed out. No flags/images — just numbers, so the

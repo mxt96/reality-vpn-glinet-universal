@@ -38,6 +38,7 @@
         checking: false, updating: false, updateMsg: "",
         subs: [], subsLoaded: false, subUrl: "", subName: "", subMsg: "", subOk: false, subBusy: false, refreshingSubs: false,
         pings: {}, pinging: false,
+        query: "",                // server-list search (name/country/city substring) — for 100+ servers
         protoFilter: "all"        // All | reality | hysteria2 — filters the server list + Auto pool
       };
     },
@@ -206,6 +207,16 @@
         call("set_fav", { tag: sv.tag, on: newOn ? 1 : 0 }).then(function () { self.loadServers(); })
           .catch(function () { sv.fav = !newOn; });
       },
+      setFavBulk: function (tags, on) {
+        // Star/unstar MANY servers at once = the currently-shown (filtered) set, so the
+        // "Auto ★" pool becomes exactly your filter in one tap. ONE backend rebuild, not N
+        // (matters with 100+ servers from a subscription).
+        if (!tags || !tags.length) return;
+        var self = this; this.busy = true;
+        call("set_fav_bulk", { tags: tags, on: on ? 1 : 0 })
+          .then(function () { self.busy = false; self.loadServers(); })
+          .catch(function () { self.busy = false; self.loadServers(); });
+      },
       startEdit: function (sv) {
         this.editTag = sv.tag;
         this.editLink = "";
@@ -328,7 +339,12 @@
       function srvActive(tag) { return s.mode === tag || (isAutoMode(s.mode) && s.active === tag); }
 
       // ---- servers list (filtered by protocol) + an "Auto" row; tap a server to connect ----
-      var fservers = wantType ? (t.servers || []).filter(function (sv) { return sv.type === wantType; }) : (t.servers || []);
+      var q = (t.query || "").trim().toLowerCase();
+      var fservers = (t.servers || []).filter(function (sv) {
+        if (wantType && sv.type !== wantType) return false;
+        if (q && (sv.tag || "").toLowerCase().indexOf(q) === -1) return false;
+        return true;
+      });
       var serverRows;
       if (!t.serversLoaded) serverRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("Loading…")])];
       else if (!t.servers.length) serverRows = [h("div", { style: { color: "#8a8f99", fontSize: "13px", padding: "6px 0" } }, [t._v("No custom servers yet. Add one below.")])];
@@ -493,6 +509,12 @@
             h("div", { style: { fontWeight: "600", fontSize: "15px" } }, [t._v("Servers")]),
             (t.servers && t.servers.length) ? h("gl-button", { staticClass: "btn-item", attrs: { loading: t.pinging }, on: { click: function () { t.pingServers(); } } }, [t._v("Test ping")]) : null
           ]),
+          (t.servers && t.servers.length) ? h("el-input", { staticClass: "r-in", style: { marginBottom: "8px" }, attrs: { value: t.query, placeholder: "Поиск сервера (страна / город / имя)…", size: "small", clearable: true }, on: { input: function (v) { t.query = v; } } }) : null,
+          (t.servers && t.servers.length) ? h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", margin: "0 0 8px" } }, [
+            h("span", { style: { fontSize: "12px", color: "#8a8f99", marginRight: "10px" } }, [t._v("Показано " + fservers.length + " из " + t.servers.length)]),
+            fservers.length ? h("gl-button", { staticClass: "btn-item", style: { marginRight: "8px" }, attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(fservers.map(function (x) { return x.tag; }), 1); } } }, [t._v("★ всё показанное")]) : null,
+            fservers.length ? h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(fservers.map(function (x) { return x.tag; }), 0); } } }, [t._v("Снять ★")]) : null
+          ]) : null,
           h("div", {}, serverRows),
           addBox
         ])]),

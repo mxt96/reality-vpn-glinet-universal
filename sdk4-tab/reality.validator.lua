@@ -9,6 +9,7 @@ return {
     list_servers = true,
     get_fav = true,
     set_fav = true,
+    set_fav_bulk = true,
     ping_servers = true,
     add_server = true,
     import_links = true,
