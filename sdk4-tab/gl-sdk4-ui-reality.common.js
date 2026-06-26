@@ -488,12 +488,18 @@
       // 1) NETWORK STATUS HEADER
       // ======================================================================
       var tun = t.tunneled;
+      // VPN off but we still know the real (direct) egress from get_status/geo cache ->
+      // show the CURRENT (direct) connection instead of blank dashes (mason's bug:
+      // "когда впн выключен то данные по текущему подключению не определяются").
+      var hasGeo = !!(s.egress || s.country);
+      var direct = !tun && hasGeo;          // VPN off, internet up: show the direct egress
+      var live = tun || direct;
       var activeSv = (t.servers || []).filter(function (x) { return x.tag === s.active; })[0];
       var hdrCC = detectCC(s.country || s.active || "");
-      var hdrFlag = !tun ? "🚫" : (isoFlag(hdrCC) || "🌐");
-      var hdrCountry = !tun ? "Не подключено" : (CC_RU[hdrCC] || s.country || "—");
-      var hdrProto = activeSv ? famLabel(famOf(activeSv)) : (s.protocol || "");
-      var hdrSub = !tun ? "—" : ([s.city, hdrProto].filter(Boolean).join(" · ") || "—");
+      var hdrFlag = !live ? "🚫" : (isoFlag(hdrCC) || "🌐");
+      var hdrCountry = !live ? "Не подключено" : (CC_RU[hdrCC] || s.country || "—");
+      var hdrProto = tun ? (activeSv ? famLabel(famOf(activeSv)) : (s.protocol || "")) : "Прямое (без VPN)";
+      var hdrSub = !live ? "—" : ([s.city, hdrProto].filter(Boolean).join(" · ") || "—");
 
       function cell(label, valNode, borderRight) {
         return h("div", { style: { padding: "11px 16px", borderTop: "1px solid " + C.line, borderRight: borderRight ? "1px solid " + C.line : "none" } }, [
@@ -509,7 +515,7 @@
           unit ? h("span", { style: { fontSize: "11px", color: C.se, fontWeight: "600", marginLeft: "2px" } }, [t._v(unit)]) : null
         ]);
       }
-      var pingNode = tun && s.ping ? val(s.ping, "мс", pingColor(s.ping)) : dim();
+      var pingNode = (live && s.ping) ? val(s.ping, "мс", pingColor(s.ping)) : dim();
       var dnNode = (tun && t.traf.ok) ? val(t.mbits(t.traf.downS), "Мбит/с") : dim();
       var upNode = (tun && t.traf.ok) ? val(t.mbits(t.traf.upS), "Мбит/с") : dim();
 
@@ -523,10 +529,13 @@
           tun ? h("span", { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", color: C.gr, background: "#e8f8f0", padding: "4px 10px", borderRadius: "999px" } }, [
             h("span", { style: { width: "8px", height: "8px", borderRadius: "50%", background: C.gr } }),
             t._v("В сети")
-          ]) : null
+          ]) : (direct ? h("span", { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", color: "#b9821a", background: "#fff6e6", padding: "4px 10px", borderRadius: "999px" } }, [
+            h("span", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#d98a00" } }),
+            t._v("Без VPN")
+          ]) : null)
         ]),
         h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr" } }, [
-          cell("IP", tun ? val(s.egress) : dim(), true),
+          cell("IP", live ? val(s.egress) : dim(), true),
           cell("ПИНГ", pingNode, false),
           cell("ЗАГРУЗКА ↓", dnNode, true),
           cell("ВЫГРУЗКА ↑", upNode, false)

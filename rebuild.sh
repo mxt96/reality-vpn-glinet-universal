@@ -19,7 +19,7 @@ SRV_OUT=""; SRV_TAGS=""; REA_TAGS=""; HY2_TAGS=""; N=0
 for f in "$SRVDIR"/*.json; do
   [ -f "$f" ] || continue
   t=$(basename "$f" .json)
-  ty=$(sed -n 's/.*"type": *"\([a-z0-9]*\)".*/\1/p' "$f" | head -1)
+  ty=$(grep -oE '"type"[ ]*:[ ]*"[a-z0-9]+"' "$f" | head -1 | sed -E 's/.*"([a-z0-9]+)"$/\1/')
   SRV_OUT="$SRV_OUT,
 $(cat "$f")"
   SRV_TAGS="$SRV_TAGS,\"$t\""

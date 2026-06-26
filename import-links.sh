@@ -70,6 +70,14 @@ add_one(){ # add_one <link>  -> writes file, echoes tag on success (no rebuild)
   case "$_l" in
     *@0.0.0.0:*|*@0.0.0.0/*|*@127.0.0.1:1\?*|*00000000-0000-0000-0000-000000000000*) return 1 ;;
   esac
+  # DEDUP: skip a link whose connection part (everything before the #name) was already
+  # imported in this run. A subscription that lists the same node twice — or being
+  # imported twice — used to create srv-X + srv-X-1 + … duplicates (199 files for 102
+  # servers). Identical connection => same key => skipped; different transport/path =>
+  # different query string => different key => kept.
+  _key=${_l%%#*}
+  if [ -f /tmp/imp-seen ] && grep -qxF "$_key" /tmp/imp-seen 2>/dev/null; then return 1; fi
+  echo "$_key" >> /tmp/imp-seen
   _nm=$(printf '%s' "$_l" | sed -n 's/^[^#]*#//p'); _nm=$(urldec "$_nm")
   _base=$(printf '%s' "$_nm" | tr -c 'A-Za-z0-9._-' '_' | sed 's/^_*//; s/_*$//')
   [ -z "$_base" ] && _base="srv-$(date +%s)"
@@ -83,6 +91,7 @@ add_one(){ # add_one <link>  -> writes file, echoes tag on success (no rebuild)
 }
 
 NEWTAGS=""
+: > /tmp/imp-seen   # reset per-run dedup ledger (see add_one)
 OLDIFS=$IFS; IFS='
 '
 for line in $RAW; do
@@ -108,6 +117,7 @@ fi
 # re-add one at a time so the valid ones survive and only the bad ones drop.
 for t in $NEWTAGS; do rm -f "$SRV/$t.json"; done
 ADDED=0; FAILED=0; TAGS=""
+: > /tmp/imp-seen   # reset dedup ledger for the one-by-one fallback pass
 IFS='
 '
 for line in $RAW; do
