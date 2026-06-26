@@ -169,11 +169,15 @@ end
 
 -- ---- servers ------------------------------------------------------------
 function M.list_servers(args)
+    -- fam = protocol family for the UI filter (reality / tls / trojan / shadowsocks /
+    -- hysteria2). vless splits on Reality presence: a "reality" block in the json => the
+    -- DPI-resistant Reality transport, otherwise plain VLESS-over-TLS. busybox-safe sh.
     local out = trim(sh([[L=""; FAVF=/etc/sing-box/favorites; for f in /etc/sing-box/servers/*.json; do [ -f "$f" ] || continue; ]] ..
         [[t=$(basename "$f" .json); ty=$(sed -n 's/.*"type": *"\([a-z0-9]*\)".*/\1/p' "$f"|head -1); ]] ..
         [[sv=$(sed -n 's/.*"server": *"\([^"]*\)".*/\1/p' "$f"|head -1); ]] ..
+        [[fam="$ty"; case "$ty" in vless) if grep -q '"reality"' "$f"; then fam=reality; else fam=tls; fi;; esac; ]] ..
         [[fv=false; [ -f "$FAVF" ] && grep -qxF "$t" "$FAVF" && fv=true; ]] ..
-        [[L="$L,{\"tag\":\"$t\",\"type\":\"$ty\",\"server\":\"$sv\",\"fav\":$fv}"; done; echo "[${L#,}]"]]))
+        [[L="$L,{\"tag\":\"$t\",\"type\":\"$ty\",\"fam\":\"$fam\",\"server\":\"$sv\",\"fav\":$fv}"; done; echo "[${L#,}]"]]))
     local ok, arr = pcall(cjson.decode, out)
     if ok and type(arr) == "table" then return { servers = arr } end
     return { servers = {} }
