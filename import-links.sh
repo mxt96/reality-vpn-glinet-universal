@@ -70,6 +70,12 @@ add_one(){ # add_one <link>  -> writes file, echoes tag on success (no rebuild)
   case "$_l" in
     *@0.0.0.0:*|*@0.0.0.0/*|*@127.0.0.1:1\?*|*00000000-0000-0000-0000-000000000000*) return 1 ;;
   esac
+  # Skip transports sing-box CANNOT speak (xhttp / splithttp are Xray-only). Importing
+  # them used to create a vless+TLS server WITHOUT the transport block -> it parsed and
+  # imported fine but never connected (dead, confusing). Drop them so the list only holds
+  # servers that actually work. (Found via a standalone tunnel test: 21 xHTTP RockBlack
+  # nodes were all dead for exactly this reason.)
+  case "$_l" in *type=xhttp*|*type=splithttp*|*"type=xhttp"*) return 1 ;; esac
   # DEDUP: skip a link whose connection part (everything before the #name) was already
   # imported in this run. A subscription that lists the same node twice — or being
   # imported twice — used to create srv-X + srv-X-1 + … duplicates (199 files for 102

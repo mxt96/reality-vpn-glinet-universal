@@ -44,6 +44,9 @@ qp(){ for k in "$@"; do v=$(printf '%s' "$QS" | tr '&' '\n' | sed -n "s/^$k=//p"
 
 SCHEME=$(printf '%s' "$LINK" | sed -n 's#^\([a-zA-Z0-9]*\)://.*#\1#p' | tr 'A-Z' 'a-z')
 [ -z "$SCHEME" ] && die "no scheme (expected vless:// vmess:// trojan:// ss:// hysteria2:// tuic://)"
+# xhttp / splithttp are Xray-only transports sing-box can't speak — reject so we never
+# emit a transport-less (broken) server that imports OK but never connects.
+case "$LINK" in *type=xhttp*|*type=splithttp*) die "transport xhttp/splithttp not supported by sing-box" ;; esac
 BODY=$(printf '%s' "$LINK" | sed 's#^[a-zA-Z0-9]*://##')
 
 # split out the #fragment (name); for vmess the body is base64 so handle separately
