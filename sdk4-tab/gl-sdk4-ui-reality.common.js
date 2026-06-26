@@ -295,9 +295,23 @@
       setProto: function (key) {
         if (this.busy) return;
         var self = this; this.busy = true;
-        call("set_proto", { proto: key }).then(function () {
-          setTimeout(function () { self.busy = false; self.refresh(); }, 2500);
-        }).catch(function () { self.busy = false; self.refresh(); });
+        function doSel() {
+          call("set_proto", { proto: key }).then(function () {
+            setTimeout(function () { self.busy = false; self.refresh(); }, 2500);
+          }).catch(function () { self.busy = false; self.refresh(); });
+        }
+        // If the VPN is OFF, selecting a server / Auto has no effect — there's no running
+        // sing-box (clash API down) to apply the selection, so the tap silently did
+        // nothing. Tapping a server should CONNECT to it: turn the tunnel on first, give
+        // it time to come up, then apply the selection.
+        if (!this.vpnOn) {
+          this.vpnOn = true;
+          call("set_enabled", { on: true }).then(function () {
+            setTimeout(doSel, 3000);
+          }).catch(function () { self.busy = false; self.refresh(); });
+        } else {
+          doSel();
+        }
       },
       // ---- new filter / selection helpers ----
       toggleAdd: function () { this.showAdd = !this.showAdd; },
