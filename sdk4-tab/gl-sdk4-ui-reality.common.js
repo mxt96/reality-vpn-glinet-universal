@@ -27,18 +27,18 @@
   // detectCC(str) reads a country out of a server tag / status field; flags are
   // generated from the ISO code so we ship ZERO image assets (light for the Mudi).
   var CC_RU = {
-    US: "США", GB: "Великобритания", DE: "Германия", NL: "Нидерланды", FR: "Франция",
-    FI: "Финляндия", RU: "Россия", SE: "Швеция", NO: "Норвегия", PL: "Польша",
-    CH: "Швейцария", AT: "Австрия", IT: "Италия", ES: "Испания", CA: "Канада",
-    JP: "Япония", SG: "Сингапур", HK: "Гонконг", KR: "Корея", IN: "Индия",
-    AU: "Австралия", TR: "Турция", AE: "ОАЭ", UA: "Украина", CZ: "Чехия",
-    RO: "Румыния", BG: "Болгария", LT: "Литва", LV: "Латвия", EE: "Эстония",
-    IE: "Ирландия", DK: "Дания", BE: "Бельгия", LU: "Люксембург", HU: "Венгрия",
-    PT: "Португалия", GR: "Греция", IS: "Исландия", IL: "Израиль", BR: "Бразилия",
-    AR: "Аргентина", MX: "Мексика", ZA: "ЮАР", CN: "Китай", TW: "Тайвань",
-    VN: "Вьетнам", TH: "Таиланд", ID: "Индонезия", MY: "Малайзия", PH: "Филиппины",
-    KZ: "Казахстан", MD: "Молдова", RS: "Сербия", HR: "Хорватия", SK: "Словакия",
-    SI: "Словения", AM: "Армения", GE: "Грузия", BY: "Беларусь"
+    US: "United States", GB: "United Kingdom", DE: "Germany", NL: "Netherlands", FR: "France",
+    FI: "Finland", RU: "Russia", SE: "Sweden", NO: "Norway", PL: "Poland",
+    CH: "Switzerland", AT: "Austria", IT: "Italy", ES: "Spain", CA: "Canada",
+    JP: "Japan", SG: "Singapore", HK: "Hong Kong", KR: "Korea", IN: "India",
+    AU: "Australia", TR: "Turkey", AE: "UAE", UA: "Ukraine", CZ: "Czechia",
+    RO: "Romania", BG: "Bulgaria", LT: "Lithuania", LV: "Latvia", EE: "Estonia",
+    IE: "Ireland", DK: "Denmark", BE: "Belgium", LU: "Luxembourg", HU: "Hungary",
+    PT: "Portugal", GR: "Greece", IS: "Iceland", IL: "Israel", BR: "Brazil",
+    AR: "Argentina", MX: "Mexico", ZA: "South Africa", CN: "China", TW: "Taiwan",
+    VN: "Vietnam", TH: "Thailand", ID: "Indonesia", MY: "Malaysia", PH: "Philippines",
+    KZ: "Kazakhstan", MD: "Moldova", RS: "Serbia", HR: "Croatia", SK: "Slovakia",
+    SI: "Slovenia", AM: "Armenia", GE: "Georgia", BY: "Belarus"
   };
   // keyword (lowercased country name / russian name / major city) -> ISO
   var CC_NAMES = {
@@ -237,16 +237,16 @@
       },
       addSub: function () {
         var self = this; var url = (this.subUrl || "").trim();
-        if (!/^https?:\/\//i.test(url)) { this.subOk = false; this.subMsg = "Вставьте URL подписки (https://…)"; return; }
+        if (!/^https?:\/\//i.test(url)) { this.subOk = false; this.subMsg = "Subscription URL (https://…)"; return; }
         this.subBusy = true; this.subMsg = "";
         call("add_sub", { url: url, name: (this.subName || "").trim() }).then(function (r) {
           self.subBusy = false;
           if (r && r.ok) {
             self.subUrl = ""; self.subName = ""; self.subOk = true;
-            self.subMsg = "Добавлено — " + (r.added || 0) + " серверов";
+            self.subMsg = "Added — " + (r.added || 0) + " servers";
             self.loadSubs(); self.loadServers();
-          } else { self.subOk = false; self.subMsg = (r && r.msg) ? r.msg : "Не удалось добавить подписку"; }
-        }).catch(function () { self.subBusy = false; self.subOk = false; self.subMsg = "Не удалось добавить подписку"; });
+          } else { self.subOk = false; self.subMsg = (r && r.msg) ? r.msg : "Couldn't add subscription"; }
+        }).catch(function () { self.subBusy = false; self.subOk = false; self.subMsg = "Couldn't add subscription"; });
       },
       delSub: function (id) {
         var self = this; this.subBusy = true;
@@ -260,19 +260,19 @@
           self.refreshingSubs = false;
           if (r && r.ok) {
             self.subOk = true;
-            self.subMsg = "Обновлено — " + (r.added || 0) + " новых, " + (r.removed || 0) + " удалено";
+            self.subMsg = "Updated — " + (r.added || 0) + " new, " + (r.removed || 0) + " removed";
             self.loadSubs(); self.loadServers();
-          } else { self.subOk = false; self.subMsg = (r && r.msg) ? r.msg : "Обновление не удалось"; }
-        }).catch(function () { self.refreshingSubs = false; self.subOk = false; self.subMsg = "Обновление не удалось"; });
+          } else { self.subOk = false; self.subMsg = (r && r.msg) ? r.msg : "Update failed"; }
+        }).catch(function () { self.refreshingSubs = false; self.subOk = false; self.subMsg = "Update failed"; });
       },
       fmtAgo: function (epoch) {
-        epoch = Number(epoch) || 0; if (!epoch) return "никогда";
+        epoch = Number(epoch) || 0; if (!epoch) return "never";
         var now = Math.floor((Date.now ? Date.now() : new Date().getTime()) / 1000);
         var d = now - epoch; if (d < 0) d = 0;
-        if (d < 60) return "только что";
-        if (d < 3600) return Math.floor(d / 60) + " мин назад";
-        if (d < 86400) return Math.floor(d / 3600) + " ч назад";
-        return Math.floor(d / 86400) + " дн назад";
+        if (d < 60) return "just now";
+        if (d < 3600) return Math.floor(d / 60) + " min ago";
+        if (d < 86400) return Math.floor(d / 3600) + " h ago";
+        return Math.floor(d / 86400) + " d ago";
       },
       fmtDate: function (epoch) {
         epoch = Number(epoch) || 0; if (!epoch) return "";
@@ -318,7 +318,7 @@
       },
       addServer: function () {
         var self = this; var raw = (this.addLink || "").trim();
-        if (!raw) { this.addMsg = "Вставьте ссылку, список или подписку"; return; }
+        if (!raw) { this.addMsg = "Paste a link, list, or subscription"; return; }
         // Bulk import (Shadowrocket-style): multi-line list, an http(s) subscription
         // URL, or a base64 blob -> import_links. A single scheme link -> normal add.
         var lines = raw.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
@@ -329,17 +329,17 @@
             self.adding = false;
             if (r && r.ok && r.added > 0) {
               self.addLink = ""; self.addName = ""; self.addOk = true; self.showAdd = false;
-              self.addMsg = "Добавлено " + r.added + (r.failed ? (", пропущено " + r.failed) : "");
+              self.addMsg = "Added " + r.added + (r.failed ? (", skipped " + r.failed) : "");
               self.loadServers();
-            } else { self.addOk = false; self.addMsg = (r && r.added === 0) ? "Не найдено валидных конфигов" : ((r && r.msg) ? r.msg : "Импорт не удался"); }
-          }).catch(function () { self.adding = false; self.addOk = false; self.addMsg = "Импорт не удался"; });
+            } else { self.addOk = false; self.addMsg = (r && r.added === 0) ? "No valid configs found" : ((r && r.msg) ? r.msg : "Import failed"); }
+          }).catch(function () { self.adding = false; self.addOk = false; self.addMsg = "Import failed"; });
           return;
         }
         call("add_server", { link: raw, name: (this.addName || "").trim() }).then(function (r) {
           self.adding = false;
           if (r && r.ok) { self.addLink = ""; self.addName = ""; self.addMsg = ""; self.showAdd = false; self.loadServers(); }
-          else { self.addOk = false; self.addMsg = (r && r.msg) ? r.msg : "Не удалось добавить сервер"; }
-        }).catch(function () { self.adding = false; self.addOk = false; self.addMsg = "Не удалось добавить сервер"; });
+          else { self.addOk = false; self.addMsg = (r && r.msg) ? r.msg : "Couldn't add server"; }
+        }).catch(function () { self.adding = false; self.addOk = false; self.addMsg = "Couldn't add server"; });
       },
       delServer: function (tag) {
         // No window.confirm() here: GL's embedded panel webview can silently
@@ -386,13 +386,13 @@
       cancelEdit: function () { this.editTag = ""; this.editLink = ""; this.editName = ""; this.editMsg = ""; },
       saveEdit: function () {
         var self = this; var link = (this.editLink || "").trim();
-        if (!link) { this.editMsg = "Вставьте новую vless:// или hysteria2:// ссылку"; return; }
+        if (!link) { this.editMsg = "Paste a new vless:// or hysteria2:// link"; return; }
         this.editing = true; this.editMsg = "";
         call("edit_server", { tag: this.editTag, link: link, name: (this.editName || "").trim() }).then(function (r) {
           self.editing = false;
           if (r && r.ok) { self.cancelEdit(); self.loadServers(); }
-          else { self.editMsg = (r && r.msg) ? r.msg : "Не удалось сохранить"; }
-        }).catch(function () { self.editing = false; self.editMsg = "Не удалось сохранить"; });
+          else { self.editMsg = (r && r.msg) ? r.msg : "Couldn't save"; }
+        }).catch(function () { self.editing = false; self.editMsg = "Couldn't save"; });
       },
       fmtBytes: function (n) {
         n = Number(n) || 0; if (n < 0) n = 0;
@@ -430,13 +430,13 @@
         }).catch(function () { self.checking = false; self.verLoaded = true; });
       },
       doUpdate: function () {
-        var self = this; this.updating = true; this.updateMsg = "Обновление запланировано — устанавливается, страница перезагрузится…";
+        var self = this; this.updating = true; this.updateMsg = "Update scheduled — installing, the page will reload…";
         call("do_update").then(function (r) {
-          if (r && r.msg) self.updateMsg = r.msg + " — страница перезагрузится.";
+          if (r && r.msg) self.updateMsg = r.msg + " — the page will reload.";
           // the installer restarts services and this very tab; reload after ~85s to
           // pick up the new version + confirmation.
           setTimeout(function () { try { location.reload(); } catch (e) {} }, 85000);
-        }).catch(function () { self.updating = false; self.updateMsg = "Не удалось запустить обновление"; });
+        }).catch(function () { self.updating = false; self.updateMsg = "Couldn't start the update"; });
       }
     },
     render: function (h) {
@@ -497,8 +497,8 @@
       var activeSv = (t.servers || []).filter(function (x) { return x.tag === s.active; })[0];
       var hdrCC = detectCC(s.country || s.active || "");
       var hdrFlag = !live ? "🚫" : (isoFlag(hdrCC) || "🌐");
-      var hdrCountry = !live ? "Не подключено" : (CC_RU[hdrCC] || s.country || "—");
-      var hdrProto = tun ? (activeSv ? famLabel(famOf(activeSv)) : (s.protocol || "")) : "Прямое (без VPN)";
+      var hdrCountry = !live ? "Not connected" : (CC_RU[hdrCC] || s.country || "—");
+      var hdrProto = tun ? (activeSv ? famLabel(famOf(activeSv)) : (s.protocol || "")) : "Direct (no VPN)";
       var hdrSub = !live ? "—" : ([s.city, hdrProto].filter(Boolean).join(" · ") || "—");
 
       function cell(label, valNode, borderRight) {
@@ -515,9 +515,9 @@
           unit ? h("span", { style: { fontSize: "11px", color: C.se, fontWeight: "600", marginLeft: "2px" } }, [t._v(unit)]) : null
         ]);
       }
-      var pingNode = (live && s.ping) ? val(s.ping, "мс", pingColor(s.ping)) : dim();
-      var dnNode = (tun && t.traf.ok) ? val(t.mbits(t.traf.downS), "Мбит/с") : dim();
-      var upNode = (tun && t.traf.ok) ? val(t.mbits(t.traf.upS), "Мбит/с") : dim();
+      var pingNode = (live && s.ping) ? val(s.ping, "ms", pingColor(s.ping)) : dim();
+      var dnNode = (tun && t.traf.ok) ? val(t.mbits(t.traf.downS), "Mbit/s") : dim();
+      var upNode = (tun && t.traf.ok) ? val(t.mbits(t.traf.upS), "Mbit/s") : dim();
 
       var netCard = h("gl-card", [h("div", { staticClass: "main", style: { padding: "0" } }, [
         h("div", { style: { display: "flex", alignItems: "center", gap: "12px", padding: "15px 16px" } }, [
@@ -528,17 +528,17 @@
           ]),
           tun ? h("span", { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", color: C.gr, background: "#e8f8f0", padding: "4px 10px", borderRadius: "999px" } }, [
             h("span", { style: { width: "8px", height: "8px", borderRadius: "50%", background: C.gr } }),
-            t._v("В сети")
+            t._v("Online")
           ]) : (direct ? h("span", { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", color: "#b9821a", background: "#fff6e6", padding: "4px 10px", borderRadius: "999px" } }, [
             h("span", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#d98a00" } }),
-            t._v("Без VPN")
+            t._v("No VPN")
           ]) : null)
         ]),
         h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr" } }, [
           cell("IP", live ? val(s.egress) : dim(), true),
-          cell("ПИНГ", pingNode, false),
-          cell("ЗАГРУЗКА ↓", dnNode, true),
-          cell("ВЫГРУЗКА ↑", upNode, false)
+          cell("PING", pingNode, false),
+          cell("DOWNLOAD ↓", dnNode, true),
+          cell("UPLOAD ↑", upNode, false)
         ])
       ])]);
 
@@ -555,21 +555,21 @@
         ]);
       }
       var controlsCard = card([
-        toggleRow("VPN", t.tunneled ? "Туннель активен" : (t.vpnOn ? "Запущен — нет сервера (прямой)" : "Туннель остановлен"), t.vpnOn, function (v) { t.toggleVpn(v); }),
+        toggleRow("VPN", t.tunneled ? "Tunnel active" : (t.vpnOn ? "Running — no server (direct)" : "Tunnel stopped"), t.vpnOn, function (v) { t.toggleVpn(v); }),
         h("div", { style: { height: "1px", background: C.line, margin: "12px 0" } }),
-        toggleRow("Kill switch", "Блокировать LAN, если туннель упал", t.ksOn, function (v) { t.toggleKs(v); })
+        toggleRow("Kill switch", "Block LAN if the tunnel drops", t.ksOn, function (v) { t.toggleKs(v); })
       ]);
 
       // ======================================================================
       // 3) ADD SERVERS button + inline panel
       // ======================================================================
-      var addButton = pillBtn("＋ Добавить сервера", null, { onClick: function () { t.toggleAdd(); } });
+      var addButton = pillBtn("＋ Add servers", null, { onClick: function () { t.toggleAdd(); } });
       var addPanel = t.showAdd ? h("div", { style: { background: "#fff", borderRadius: "14px", boxShadow: "0 1px 3px rgba(20,30,60,.06)", margin: "-4px 0 13px", padding: "14px" } }, [
-        h("el-input", { staticClass: "r-in", attrs: { value: t.addLink, type: "textarea", rows: 3, placeholder: "vless:// или hysteria2://, по одной в строке, либо URL подписки", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
-        h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.addName, placeholder: "Имя (необязательно)", size: "small" }, on: { input: function (v) { t.addName = v; } } }),
+        h("el-input", { staticClass: "r-in", attrs: { value: t.addLink, type: "textarea", rows: 3, placeholder: "vless:// or hysteria2://, one per line, or a subscription URL", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
+        h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.addName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.addName = v; } } }),
         h("div", { style: { display: "flex", gap: "8px", marginTop: "9px", alignItems: "center" } }, [
-          h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.adding }, on: { click: function () { t.addServer(); } } }, [t._v("Добавить")]),
-          h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.adding }, on: { click: function () { t.showAdd = false; } } }, [t._v("Отмена")]),
+          h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.adding }, on: { click: function () { t.addServer(); } } }, [t._v("Add")]),
+          h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.adding }, on: { click: function () { t.showAdd = false; } } }, [t._v("Cancel")]),
           t.addMsg ? h("span", { style: { marginLeft: "4px", color: (t.addOk ? C.gr : C.red), fontSize: "13px" } }, [t._v(t.addMsg)]) : null
         ])
       ]) : null;
@@ -579,7 +579,7 @@
       // ======================================================================
       var favCount = (t.servers || []).filter(function (x) { return x.fav; }).length;
       var autoActive = isAutoMode(s.mode);
-      var autoButton = pillBtn("⟳ Авто", favCount + " в пуле", { active: autoActive, onClick: function () { t.goAuto(); } });
+      var autoButton = pillBtn("⟳ Auto", favCount + " in pool", { active: autoActive, onClick: function () { t.goAuto(); } });
 
       // ======================================================================
       // 5) FILTER card (country chips + protocol chips)
@@ -588,7 +588,7 @@
       (t.servers || []).forEach(function (sv) { var c = detectCC(sv.tag) || "?"; counts[c] = (counts[c] || 0) + 1; });
       var ccKeys = Object.keys(counts).sort();
       var allOn = ccKeys.length > 0 && ccKeys.every(function (k) { return t.ccSel[k]; });
-      var ccChips = [chip([t._v("Все")], allOn, function () { t.selectAllCC(ccKeys, allOn); })];
+      var ccChips = [chip([t._v("All")], allOn, function () { t.selectAllCC(ccKeys, allOn); })];
       ccKeys.forEach(function (k) {
         var on = !!t.ccSel[k];
         ccChips.push(chip([
@@ -596,14 +596,14 @@
           h("span", { style: { color: on ? "rgba(255,255,255,.8)" : C.se, marginLeft: "5px", fontSize: "12px" } }, [t._v(String(counts[k]))])
         ], on, function () { t.toggleCC(k); }));
       });
-      var PR = [["all", "Все"], ["reality", "🔒 Reality"], ["tls", "VLESS-TLS"], ["trojan", "Trojan"], ["shadowsocks", "Shadowsocks"], ["hysteria2", "⚡ Hysteria2"]];
+      var PR = [["all", "All"], ["reality", "🔒 Reality"], ["tls", "VLESS-TLS"], ["trojan", "Trojan"], ["shadowsocks", "Shadowsocks"], ["hysteria2", "⚡ Hysteria2"]];
       var prChips = PR.map(function (o) {
         return chip([t._v(o[1])], t.prSel === o[0], function () { t.setPr(o[0]); });
       });
       var filterCard = card([
-        ctitle("Страна"),
+        ctitle("Country"),
         h("div", { style: { display: "flex", flexWrap: "wrap", gap: "7px" } }, ccChips),
-        h("div", { style: { fontSize: "13px", fontWeight: "700", color: "#3a3f4b", margin: "14px 0 12px" } }, [t._v("Протокол")]),
+        h("div", { style: { fontSize: "13px", fontWeight: "700", color: "#3a3f4b", margin: "14px 0 12px" } }, [t._v("Protocol")]),
         h("div", { style: { display: "flex", flexWrap: "wrap", gap: "7px" } }, prChips)
       ]);
 
@@ -619,16 +619,16 @@
       function srvActive(tag) { return s.mode === tag || (isAutoMode(s.mode) && s.active === tag); }
 
       var rows;
-      if (!t.serversLoaded) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("Загрузка…")])];
-      else if (!t.servers.length) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("Серверов пока нет. Добавьте сверху.")])];
-      else if (!shown.length) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("Нет серверов под фильтр.")])];
+      if (!t.serversLoaded) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("Loading…")])];
+      else if (!t.servers.length) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("No servers yet. Add some above.")])];
+      else if (!shown.length) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("No servers match the filter.")])];
       else {
         rows = shown.map(function (sv, idx) {
           var cc = detectCC(sv.tag) || "?";
           var fl = (cc === "?" ? "🏳️" : isoFlag(cc));
           var name = (sv.tag || "").replace(/^srv-/, "");
           var pv = t.pings[sv.tag];
-          var pingTxt = (pv === undefined || pv === null) ? (t.pinging ? "…" : "—") : (pv < 0 ? "timeout" : (pv + " мс"));
+          var pingTxt = (pv === undefined || pv === null) ? (t.pinging ? "…" : "—") : (pv < 0 ? "timeout" : (pv + " ms"));
           var pingClr = (pv === undefined || pv === null) ? C.se : pingColor(pv);
           var isPick = (s.mode === sv.tag);
           var nowTag = srvActive(sv.tag);
@@ -647,7 +647,7 @@
             h("div", { style: { flex: "1", minWidth: "0" } }, [
               h("div", { style: { fontSize: "14px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" } }, [
                 t._v(fl + " " + name),
-                nowTag ? h("span", { style: { color: C.blue, fontWeight: "800", fontSize: "11px" } }, [t._v("● сейчас")]) : null
+                nowTag ? h("span", { style: { color: C.blue, fontWeight: "800", fontSize: "11px" } }, [t._v("● now")]) : null
               ]),
               h("div", { style: { fontSize: "11.5px", color: C.se, marginTop: "2px" } }, [t._v(famLabel(famOf(sv)) + " · " + (sv.server || ""))])
             ]),
@@ -658,7 +658,7 @@
               ? h("span", {
                   style: { fontSize: "12px", fontWeight: "700", color: C.red, whiteSpace: "nowrap", cursor: "pointer", padding: "2px 4px", userSelect: "none" },
                   on: { click: function (e) { e.stopPropagation(); if (!t.busy) t.armDel(sv.tag); } }
-                }, [t._v("Удалить?")])
+                }, [t._v("Delete?")])
               : h("span", {
                   style: { fontSize: "15px", lineHeight: "1", color: "#c4c8d2", cursor: "pointer", padding: "2px 4px", userSelect: "none" },
                   on: { click: function (e) { e.stopPropagation(); if (!t.busy) t.armDel(sv.tag); } }
@@ -668,13 +668,13 @@
       }
 
       var bulkRow = (t.servers && t.servers.length && shown.length) ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" } }, [
-        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 1); } } }, [t._v("★ всё показанное")]),
-        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 0); } } }, [t._v("Снять ★")]),
-        h("gl-button", { staticClass: "btn-item", attrs: { loading: t.pinging }, on: { click: function () { t.pingServers(); } } }, [t._v("Пинг")])
+        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 1); } } }, [t._v("★ all shown")]),
+        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 0); } } }, [t._v("Clear ★")]),
+        h("gl-button", { staticClass: "btn-item", attrs: { loading: t.pinging }, on: { click: function () { t.pingServers(); } } }, [t._v("Ping")])
       ]) : null;
 
       var serversCard = card([
-        ctitle("Серверы", (t.servers && t.servers.length) ? ("показано " + shown.length + " из " + t.servers.length) : null),
+        ctitle("Servers", (t.servers && t.servers.length) ? ("showing " + shown.length + " of " + t.servers.length) : null),
         h("div", {}, rows),
         bulkRow
       ]);
@@ -691,13 +691,13 @@
       }
 
       var subRows;
-      if (!t.subsLoaded) subRows = [h("div", { style: { color: C.se, fontSize: "13px", padding: "6px 0" } }, [t._v("Загрузка…")])];
-      else if (!t.subs.length) subRows = [h("div", { style: { color: C.se, fontSize: "13px", padding: "6px 0" } }, [t._v("Подписок пока нет. Добавьте ниже.")])];
+      if (!t.subsLoaded) subRows = [h("div", { style: { color: C.se, fontSize: "13px", padding: "6px 0" } }, [t._v("Loading…")])];
+      else if (!t.subs.length) subRows = [h("div", { style: { color: C.se, fontSize: "13px", padding: "6px 0" } }, [t._v("No subscriptions yet. Add one below.")])];
       else subRows = t.subs.map(function (sb) {
         var meta = [];
         if (sb.used || sb.total) meta.push("↓ " + t.fmtBytes(sb.used) + (sb.total ? (" / " + t.fmtBytes(sb.total)) : " / ∞"));
-        if (sb.expire) meta.push("до " + t.fmtDate(sb.expire));
-        var line2 = (sb.count || 0) + " серверов · обновлено " + t.fmtAgo(sb.updated);
+        if (sb.expire) meta.push("until " + t.fmtDate(sb.expire));
+        var line2 = (sb.count || 0) + " servers · updated " + t.fmtAgo(sb.updated);
         var kids = [
           h("div", { style: { fontSize: "14px", fontWeight: "500", wordBreak: "break-all" } }, [t._v(sb.name || sb.id)]),
           h("div", { style: { fontSize: "12px", color: C.se } }, [t._v(line2)])
@@ -705,49 +705,49 @@
         if (meta.length) kids.push(h("div", { style: { fontSize: "12px", color: C.se } }, [t._v(meta.join(" · "))]));
         return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid " + C.line } }, [
           h("div", { style: { minWidth: "0" } }, kids),
-          h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.subBusy }, on: { click: function () { t.delSub(sb.id); } } }, [t._v("Удалить")])
+          h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.subBusy }, on: { click: function () { t.delSub(sb.id); } } }, [t._v("Remove")])
         ]);
       });
       var subsCard = card([
-        sectionTitle("Подписки"),
-        h("p", { style: { fontSize: "12px", color: C.se, margin: "0 0 10px" } }, [t._v("Вставьте ссылку подписки VLESS/Reality — все её серверы появятся выше, авто-обновление каждые 6 ч.")]),
+        sectionTitle("Subscriptions"),
+        h("p", { style: { fontSize: "12px", color: C.se, margin: "0 0 10px" } }, [t._v("Paste a VLESS/Reality subscription link — all its servers appear above, auto-refreshed every 6 h.")]),
         h("div", {}, subRows),
         h("div", { style: { marginTop: "12px" } }, [
-          h("el-input", { staticClass: "r-in", attrs: { value: t.subUrl, placeholder: "URL подписки (https://…)", size: "small", clearable: true }, on: { input: function (v) { t.subUrl = v; } } }),
-          h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.subName, placeholder: "Имя (необязательно)", size: "small" }, on: { input: function (v) { t.subName = v; } } }),
+          h("el-input", { staticClass: "r-in", attrs: { value: t.subUrl, placeholder: "Subscription URL (https://…)", size: "small", clearable: true }, on: { input: function (v) { t.subUrl = v; } } }),
+          h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.subName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.subName = v; } } }),
           h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px", marginTop: "8px" } }, [
-            h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.subBusy }, on: { click: function () { t.addSub(); } } }, [t._v("Добавить подписку")]),
-            (t.subs && t.subs.length) ? h("gl-button", { staticClass: "btn-item", attrs: { loading: t.refreshingSubs }, on: { click: function () { t.refreshSubs(); } } }, [t._v("Обновить")]) : null,
+            h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.subBusy }, on: { click: function () { t.addSub(); } } }, [t._v("Add subscription")]),
+            (t.subs && t.subs.length) ? h("gl-button", { staticClass: "btn-item", attrs: { loading: t.refreshingSubs }, on: { click: function () { t.refreshSubs(); } } }, [t._v("Update")]) : null,
             t.subMsg ? h("span", { style: { color: (t.subOk ? C.gr : C.red), fontSize: "13px" } }, [t._v(t.subMsg)]) : null
           ])
         ])
       ]);
 
-      var spdLine = t.spd ? h("span", { style: { marginLeft: "12px", fontWeight: "600" } }, [t._v("↓ " + t.spd.down + " · ↑ " + t.spd.up + " Мбит/с")]) : null;
+      var spdLine = t.spd ? h("span", { style: { marginLeft: "12px", fontWeight: "600" } }, [t._v("↓ " + t.spd.down + " · ↑ " + t.spd.up + " Mbit/s")]) : null;
       var speedCard = card([
-        sectionTitle("Тест скорости"),
+        sectionTitle("Speed test"),
         h("div", { style: { display: "flex", alignItems: "center" } }, [
-          h("gl-button", { attrs: { type: "primary", loading: t.spdRunning }, on: { click: function () { t.runSpeedtest(); } } }, [t._v(t.spdRunning ? "Тест…" : "Запустить тест")]),
+          h("gl-button", { attrs: { type: "primary", loading: t.spdRunning }, on: { click: function () { t.runSpeedtest(); } } }, [t._v(t.spdRunning ? "Testing…" : "Run test")]),
           spdLine
         ])
       ]);
 
       var versionCard = card([
-        sectionTitle("Версия"),
-        kv("Установлено", t.ver.installed || (t.verLoaded ? "неизвестно" : "…")),
-        kv("Доступно", t.ver.latest || (t.verLoaded ? "неизвестно" : "…")),
+        sectionTitle("Version"),
+        kv("Installed", t.ver.installed || (t.verLoaded ? "unknown" : "…")),
+        kv("Latest", t.ver.latest || (t.verLoaded ? "unknown" : "…")),
         h("div", { style: { marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" } }, [
-          h("gl-button", { attrs: { loading: t.checking }, on: { click: function () { t.checkUpdate(); } } }, [t._v("Проверить обновления")]),
-          t.ver.update ? h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.updating }, on: { click: function () { t.doUpdate(); } } }, [t._v("Обновить")]) : null,
-          (t.verLoaded && !t.ver.update && t.ver.latest && t.ver.latest !== "неизвестно") ? h("span", { style: { color: C.gr, fontSize: "13px" } }, [t._v("Актуальная версия")]) : null,
+          h("gl-button", { attrs: { loading: t.checking }, on: { click: function () { t.checkUpdate(); } } }, [t._v("Check for updates")]),
+          t.ver.update ? h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.updating }, on: { click: function () { t.doUpdate(); } } }, [t._v("Update")]) : null,
+          (t.verLoaded && !t.ver.update && t.ver.latest && t.ver.latest !== "unknown") ? h("span", { style: { color: C.gr, fontSize: "13px" } }, [t._v("Up to date")]) : null,
           t.updateMsg ? h("span", { style: { color: C.se, fontSize: "13px" } }, [t._v(t.updateMsg)]) : null
         ])
       ]);
 
       // ---- error / loading banner (kept minimal) ----
       var banner = null;
-      if (!t.loaded) banner = h("div", { staticClass: "status-tips" }, [h("p", [t._v("Загрузка…")])]);
-      else if (t.err) banner = h("div", { staticClass: "status-tips is-warning" }, [h("span", { staticClass: "iconfont icon-warning" }), h("p", [t._v("Не удалось прочитать статус туннеля.")])]);
+      if (!t.loaded) banner = h("div", { staticClass: "status-tips" }, [h("p", [t._v("Loading…")])]);
+      else if (t.err) banner = h("div", { staticClass: "status-tips is-warning" }, [h("span", { staticClass: "iconfont icon-warning" }), h("p", [t._v("Couldn't read tunnel status.")])]);
 
       return h("div", { staticClass: "reality-wrapper" }, [
         banner,
