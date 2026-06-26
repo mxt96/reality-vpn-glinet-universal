@@ -43,12 +43,12 @@ else
   FILT_OUT=""; SEL_EXTRA=""
   if [ -n "$REA_TAGS" ]; then
     FILT_OUT="$FILT_OUT,
-    { \"type\": \"urltest\", \"tag\": \"auto-reality\", \"outbounds\": [${REA_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }"
+    { \"type\": \"urltest\", \"tag\": \"auto-reality\", \"outbounds\": [${REA_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80, \"interrupt_exist_connections\": true }"
     SEL_EXTRA="$SEL_EXTRA,\"auto-reality\""
   fi
   if [ -n "$HY2_TAGS" ]; then
     FILT_OUT="$FILT_OUT,
-    { \"type\": \"urltest\", \"tag\": \"auto-hy2\", \"outbounds\": [${HY2_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }"
+    { \"type\": \"urltest\", \"tag\": \"auto-hy2\", \"outbounds\": [${HY2_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80, \"interrupt_exist_connections\": true }"
     SEL_EXTRA="$SEL_EXTRA,\"auto-hy2\""
   fi
   # Favorites pool — urltest over user-starred servers (file /etc/sing-box/favorites,
@@ -60,11 +60,11 @@ else
   fi
   if [ -n "$FAV_TAGS" ]; then
     FILT_OUT="$FILT_OUT,
-    { \"type\": \"urltest\", \"tag\": \"auto-fav\", \"outbounds\": [${FAV_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }"
+    { \"type\": \"urltest\", \"tag\": \"auto-fav\", \"outbounds\": [${FAV_TAGS#,}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80, \"interrupt_exist_connections\": true }"
     SEL_EXTRA="$SEL_EXTRA,\"auto-fav\""
   fi
   OUTBOUNDS="${SRV_OUT#,},
-    { \"type\": \"urltest\", \"tag\": \"auto\", \"outbounds\": [${SRV_TAGS_CLEAN}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80 }${FILT_OUT},
+    { \"type\": \"urltest\", \"tag\": \"auto\", \"outbounds\": [${SRV_TAGS_CLEAN}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80, \"interrupt_exist_connections\": true }${FILT_OUT},
     { \"type\": \"selector\", \"tag\": \"select\", \"outbounds\": [\"auto\"${SEL_EXTRA}${SRV_TAGS}], \"default\": \"auto\" },
     { \"type\": \"direct\", \"tag\": \"direct\" }"
   FINAL="select"

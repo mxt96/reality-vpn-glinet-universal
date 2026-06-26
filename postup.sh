@@ -36,9 +36,21 @@ if ip link show singtun0 >/dev/null 2>&1 && pidof sing-box >/dev/null 2>&1 && tu
   fi
 else
   # tunnel DOWN or up-but-dead -> if killswitch is OFF, FAIL-OPEN: drop the policy rule so
-  # LAN uses the main table (normal internet). If killswitch is ON, ks-sync enforces the block.
-  KS=$(uci -q get route_policy.@rule[0].killswitch)
-  if [ "$KS" != "1" ]; then
+  # LAN uses the main table (normal internet). If killswitch is ON, KEEP the route (the
+  # standing sb_ks block holds traffic shut, no leak) so the moment sing-box reconnects /
+  # urltest fails over to another favorite, LAN traffic flows again with no manual step.
+  # Source of truth = ks-lib's ks_desired ($SBDIR/ks.enabled), NOT the uci mirror: that
+  # mirror is absent on routers without GL's native killswitch rule, and reading only it
+  # caused a fail-open even while the killswitch was armed (split-brain leak).
+  SBDIR=${SBDIR:-/etc/sing-box}
+  KSON=0
+  if [ -r "$SBDIR/ks-lib.sh" ]; then
+    . "$SBDIR/ks-lib.sh"; ks_desired && KSON=1
+  else
+    [ "$(cat "$SBDIR/ks.enabled" 2>/dev/null)" = "1" ] && KSON=1
+    [ "$(uci -q get route_policy.@rule[0].killswitch 2>/dev/null)" = "1" ] && KSON=1
+  fi
+  if [ "$KSON" != "1" ]; then
     while ip rule del from "$LAN" lookup 2022 pref 500 2>/dev/null; do :; done
   fi
 fi

@@ -343,6 +343,26 @@ else
   say "firewall: iptables/fw3 path active (postup.sh installs FORWARD+MASQUERADE rules)."
 fi
 
+# ---- 8b) killswitch boot + firewall-reload re-assert (universal, fw3+fw4) ---
+# The killswitch is a standing block re-checked by cron every 30s, but cron's first
+# tick can be up to 60s after boot, and a firewall reload can momentarily drop custom
+# rules -> a brief leak window EXACTLY when a server dies / the router reboots. A
+# firewall hotplug hook fires at boot (firewall start) and on every reload, on BOTH
+# fw3 and fw4, so the killswitch is reconciled immediately. ks_enforce is idempotent
+# and self-removing when disarmed, so the hook is a no-op while the killswitch is OFF.
+mkdir -p /etc/hotplug.d/firewall
+cat > /etc/hotplug.d/firewall/99-reality-ks <<'EOF'
+#!/bin/sh
+[ -r /etc/sing-box/ks-lib.sh ] || exit 0
+. /etc/sing-box/ks-lib.sh
+ks_enforce 2>/dev/null
+exit 0
+EOF
+chmod +x /etc/hotplug.d/firewall/99-reality-ks
+grep -qxF /etc/hotplug.d/firewall/99-reality-ks /etc/sysupgrade.conf 2>/dev/null || echo /etc/hotplug.d/firewall/99-reality-ks >> /etc/sysupgrade.conf 2>/dev/null || true
+ACTION=reload sh /etc/hotplug.d/firewall/99-reality-ks
+say "killswitch boot/reload hook installed (no leak window on boot or fw reload)."
+
 # ---- 9) cron: LAN forwarding re-apply, supervisor + killswitch, geo cache --
 # supervisor (auto-reconnect) and killswitch re-assert every 30s. cron's finest
 # granularity is 60s, so each runs twice a minute (:00 and :30).
