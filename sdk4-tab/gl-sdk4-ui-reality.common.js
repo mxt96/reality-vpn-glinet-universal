@@ -767,11 +767,13 @@
         banner,
         netCard,
         controlsCard,
-        addButton,
-        addPanel,
         autoButton,
         filterCard,
         serversCard,
+        // "Add servers" sits AFTER the server list (mason: more logical — browse/connect
+        // first, add at the bottom).
+        addButton,
+        addPanel,
         subsCard,
         speedCard,
         versionCard
