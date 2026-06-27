@@ -44,11 +44,20 @@ RAW=$(printf '%s' "$RAW" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 case "$RAW" in
   http://*|https://*)
     [ "$(printf '%s' "$RAW" | wc -l)" -eq 0 ] && {
-      # Send a recognized proxy-client User-Agent. Many panels (Remnawave/Marzban
-      # style) do UA content-negotiation: a generic curl UA gets a placeholder or a
-      # sing-box JSON, while a known client UA returns the base64 share-link list we
-      # parse. v2rayNG is the most widely-accepted "give me share-links" UA.
-      FETCH=$(curl -fsSL --max-time 20 -A 'v2rayNG/1.8.19' "$RAW" 2>/dev/null)
+      # Panels disagree on UA content-negotiation. Most Remnawave/Marzban panels
+      # return the base64 share-link list for a known client UA (v2rayNG). But some
+      # (e.g. White Rabbit) do the OPPOSITE: an app UA gets an Xray/sing-box JSON
+      # config (which we can't parse), and only a generic UA yields the share-link
+      # list. So try several UAs and keep the FIRST response that actually carries
+      # share-links (directly or as a base64 blob). _suburl holds the URL itself.
+      _suburl="$RAW"; FETCH=""
+      for _ua in 'v2rayNG/1.8.19' 'curl/8.4.0' 'clash-verge/1.0' ''; do
+        _r=$(curl -fsSL --max-time 20 ${_ua:+-A "$_ua"} "$_suburl" 2>/dev/null)
+        [ -z "$_r" ] && continue
+        if printf '%s' "$_r" | grep -qE '(vless|vmess|trojan|ss|hysteria2|hy2|tuic)://'; then FETCH="$_r"; break; fi
+        _d=$(b64dec "$_r")
+        if printf '%s' "$_d" | grep -qE '(vless|vmess|trojan|ss|hysteria2|hy2|tuic)://'; then FETCH="$_d"; break; fi
+      done
       [ -n "$FETCH" ] && RAW=$(printf '%s' "$FETCH" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     } ;;
 esac
