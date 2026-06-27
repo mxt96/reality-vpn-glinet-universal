@@ -166,9 +166,8 @@
         vpnOn: false, ksOn: false, tunneled: false,
         servers: [], serversLoaded: false,
         addLink: "", addName: "", addMsg: "", addOk: false, adding: false, showAdd: false,
-        editTag: "", editLink: "", editName: "", editMsg: "", editing: false,
         delTag: "",             // server row armed for delete (two-tap confirm)
-        spinning: false, spd: null, spdRunning: false,
+        spd: null, spdRunning: false,
         traf: { upS: 0, downS: 0, up: 0, down: 0, conns: 0, ok: false },
         ver: { installed: "", latest: "", update: false }, verLoaded: false,
         checking: false, updating: false, updateMsg: "",
@@ -406,23 +405,9 @@
           .then(function () { self.busy = false; self.loadServers(); })
           .catch(function () { self.busy = false; self.loadServers(); });
       },
-      startEdit: function (sv) {
-        this.editTag = sv.tag;
-        this.editLink = "";
-        this.editName = (sv.tag || "").replace(/^srv-/, "");
-        this.editMsg = "";
-      },
-      cancelEdit: function () { this.editTag = ""; this.editLink = ""; this.editName = ""; this.editMsg = ""; },
-      saveEdit: function () {
-        var self = this; var link = (this.editLink || "").trim();
-        if (!link) { this.editMsg = "Paste a new vless:// or hysteria2:// link"; return; }
-        this.editing = true; this.editMsg = "";
-        call("edit_server", { tag: this.editTag, link: link, name: (this.editName || "").trim() }).then(function (r) {
-          self.editing = false;
-          if (r && r.ok) { self.cancelEdit(); self.loadServers(); }
-          else { self.editMsg = (r && r.msg) ? r.msg : "Couldn't save"; }
-        }).catch(function () { self.editing = false; self.editMsg = "Couldn't save"; });
-      },
+      // edit-server UI was removed (rows are tap-to-connect + ✕-delete); cancelEdit is
+      // kept only to reset the delete/edit state from delServer.
+      cancelEdit: function () { this.delTag = ""; },
       fmtBytes: function (n) {
         n = Number(n) || 0; if (n < 0) n = 0;
         var u = ["B", "KB", "MB", "GB", "TB"], i = 0;
@@ -739,7 +724,7 @@
       });
       var subsCard = card([
         sectionTitle("Subscriptions"),
-        h("p", { style: { fontSize: "12px", color: C.se, margin: "0 0 10px" } }, [t._v("Paste a VLESS/Reality subscription link — all its servers appear above, auto-refreshed every 6 h.")]),
+        h("p", { style: { fontSize: "12px", color: C.se, margin: "0 0 10px" } }, [t._v("Paste a subscription link (VLESS / Reality / Trojan / Shadowsocks / Hysteria2) — all its servers appear above, auto-refreshed every 6 h.")]),
         h("div", {}, subRows),
         h("div", { style: { marginTop: "12px" } }, [
           h("el-input", { staticClass: "r-in", attrs: { value: t.subUrl, placeholder: "Subscription URL (https://…)", size: "small", clearable: true }, on: { input: function (v) { t.subUrl = v; } } }),

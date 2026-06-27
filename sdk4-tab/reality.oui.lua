@@ -77,7 +77,7 @@ function M.get_status(args)
     local ks  = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_desired && echo true || echo false"))
     local sel = now_of("select")
     local active = sel
-    if sel == "auto" or sel == "auto-reality" or sel == "auto-hy2" then active = now_of(sel) end
+    if sel == "auto" or sel == "auto-reality" or sel == "auto-hy2" or sel == "auto-fav" then active = now_of(sel) end
     local geo = trim(sh("cat /tmp/lk-geo 2>/dev/null"))
     if geo == "" then sh("(/etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1") end
     local srvjson = ""
@@ -184,13 +184,6 @@ function M.list_servers(args)
 end
 
 -- ---- favorites: star servers; "Auto ★" urltests ONLY these --------------
-function M.get_fav(args)
-    local out = trim(sh("[ -f /etc/sing-box/favorites ] && grep -v '^$' /etc/sing-box/favorites || true"))
-    local list = {}
-    for line in out:gmatch("[^\r\n]+") do list[#list+1] = line end
-    return { fav = list }
-end
-
 function M.set_fav(args)
     local tag = args and args.tag or ""
     local on = args and (args.on == true or args.on == "true" or args.on == 1 or args.on == "1")
@@ -198,7 +191,9 @@ function M.set_fav(args)
     if on then
         sh("touch /etc/sing-box/favorites; grep -qxF '" .. tag .. "' /etc/sing-box/favorites || echo '" .. tag .. "' >> /etc/sing-box/favorites")
     else
-        sh("[ -f /etc/sing-box/favorites ] && grep -vxF '" .. tag .. "' /etc/sing-box/favorites > /etc/sing-box/favorites.tmp 2>/dev/null && mv /etc/sing-box/favorites.tmp /etc/sing-box/favorites")
+        -- NB: use ';' not '&&' before mv — grep -v exits 1 when the result is EMPTY
+        -- (removing the last favorite), which would skip mv and leave the favorite stuck.
+        sh("[ -f /etc/sing-box/favorites ] && { grep -vxF '" .. tag .. "' /etc/sing-box/favorites > /etc/sing-box/favorites.tmp 2>/dev/null; mv /etc/sing-box/favorites.tmp /etc/sing-box/favorites; }")
     end
     -- rebuild so the auto-fav urltest pool reflects the change; reload sing-box if running
     sh("sh /etc/sing-box/rebuild.sh >/dev/null 2>&1; [ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = 1 ] && /etc/init.d/sing-box restart >/dev/null 2>&1", 20)
@@ -222,7 +217,7 @@ function M.set_fav_bulk(args)
     sh("F=/etc/sing-box/favorites; touch \"$F\"; T=/tmp/fav-batch.$$; : > \"$T\"; for x in " .. list ..
        "; do echo \"$x\" >> \"$T\"; done; " ..
        (on and "sort -u \"$F\" \"$T\" -o \"$F\""
-            or "grep -vxF -f \"$T\" \"$F\" > \"$F.tmp\" 2>/dev/null && mv \"$F.tmp\" \"$F\""
+            or "grep -vxF -f \"$T\" \"$F\" > \"$F.tmp\" 2>/dev/null; mv \"$F.tmp\" \"$F\""
        ) .. "; rm -f \"$T\"")
     sh("sh /etc/sing-box/rebuild.sh >/dev/null 2>&1; [ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = 1 ] && /etc/init.d/sing-box restart >/dev/null 2>&1", 25)
     return { ok = true, n = #clean }
@@ -359,48 +354,6 @@ end
 -- Edit a server: replace its share-link (and optionally rename). The original
 -- share-link isn't stored (only the parsed outbound), so the UI asks for a fresh
 -- link. Re-parses, swaps the file, rebuilds; rolls back on a rejected config.
-function M.edit_server(args)
-    local tag     = args and args.tag or ""
-    local link    = args and args.link or ""
-    local newname = args and args.name or ""
-    if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end
-    if link == "" then return { ok = false, msg = "Empty link" } end
-
-    local oldfile = SERVERS .. "/" .. tag .. ".json"
-    local ef = io.open(oldfile, "r")
-    if not ef then return { ok = false, msg = "Server not found" } end
-    local oldcontent = ef:read("*a"); ef:close()
-
-    local newtag = tag
-    if newname ~= "" then newtag = "srv-" .. newname:gsub("[^%w._%-]", "_") end
-
-    local tf = io.open("/tmp/reality-editlink", "w")
-    if not tf then return { ok = false, msg = "io error" } end
-    tf:write(link); tf:close()
-
-    local parsed = trim(sh('/etc/sing-box/parse-link.sh "$(cat /tmp/reality-editlink)" ' .. newtag .. ' 2>/dev/null'))
-    if parsed == "" then
-        return { ok = false, msg = "Unrecognized link (vless reality / hysteria2)" }
-    end
-
-    local sf = io.open(SERVERS .. "/" .. newtag .. ".json", "w")
-    if not sf then return { ok = false, msg = "io error" } end
-    sf:write(parsed); sf:close()
-    if newtag ~= tag then os.remove(oldfile) end
-
-    local r = trim(sh("/etc/sing-box/rebuild.sh 2>/dev/null | head -1"))
-    if r == "OK" then
-        return { ok = true, tag = newtag }
-    else
-        -- rollback to the previous server file
-        if newtag ~= tag then os.remove(SERVERS .. "/" .. newtag .. ".json") end
-        local rb = io.open(oldfile, "w")
-        if rb then rb:write(oldcontent); rb:close() end
-        sh("/etc/sing-box/rebuild.sh >/dev/null 2>&1")
-        return { ok = false, msg = "Server config rejected" }
-    end
-end
-
 -- ---- speedtest ----------------------------------------------------------
 function M.speedtest(args)
     local db = trim(sh("curl -4 -s --max-time 12 -o /dev/null -w '%{speed_download}' " ..

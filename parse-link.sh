@@ -64,6 +64,10 @@ if [ "$SCHEME" != "vmess" ]; then
     \[*\])   HOST=$(printf '%s' "$HOSTPORT" | sed -n 's/^\[\(.*\)\]$/\1/p'); PORT= ;;
     *)       HOST=${HOSTPORT%%:*}; PORT=${HOSTPORT##*:} ;;
   esac
+  # With no ':' in HOSTPORT, ${HOSTPORT##*:} returns the whole host -> PORT becomes the
+  # hostname (non-empty, so the per-scheme "[ -z $PORT ]" guards pass) -> we'd emit
+  # "server_port": <hostname> = invalid JSON ("Server config rejected"). Require a numeric port.
+  case "$PORT" in ""|*[!0-9]*) die "missing or non-numeric port" ;; esac
 fi
 
 # ---- reusable TLS + transport builders ------------------------------------
