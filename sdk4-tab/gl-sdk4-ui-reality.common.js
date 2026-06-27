@@ -313,7 +313,6 @@
         }
       },
       // ---- new filter / selection helpers ----
-      toggleAdd: function () { this.showAdd = !this.showAdd; },
       toggleCC: function (iso) {
         var sel = {}; for (var k in this.ccSel) sel[k] = this.ccSel[k];
         if (sel[iso]) delete sel[iso]; else sel[iso] = 1;
@@ -574,19 +573,7 @@
         toggleRow("Kill switch", "Block LAN if the tunnel drops", t.ksOn, function (v) { t.toggleKs(v); })
       ]);
 
-      // ======================================================================
-      // 3) ADD SERVERS button + inline panel
-      // ======================================================================
-      var addButton = pillBtn("＋ Add servers", null, { onClick: function () { t.toggleAdd(); } });
-      var addPanel = t.showAdd ? h("div", { style: { background: "#fff", borderRadius: "14px", boxShadow: "0 1px 3px rgba(20,30,60,.06)", margin: "-4px 0 13px", padding: "14px" } }, [
-        h("el-input", { staticClass: "r-in", attrs: { value: t.addLink, type: "textarea", rows: 3, placeholder: "vless:// or hysteria2://, one per line, or a subscription URL", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
-        h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.addName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.addName = v; } } }),
-        h("div", { style: { display: "flex", gap: "8px", marginTop: "9px", alignItems: "center" } }, [
-          h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.adding }, on: { click: function () { t.addServer(); } } }, [t._v("Add")]),
-          h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.adding }, on: { click: function () { t.showAdd = false; } } }, [t._v("Cancel")]),
-          t.addMsg ? h("span", { style: { marginLeft: "4px", color: (t.addOk ? C.gr : C.red), fontSize: "13px" } }, [t._v(t.addMsg)]) : null
-        ])
-      ]) : null;
+      // (Add-servers input was merged into the subscriptions card below the list.)
 
       // ======================================================================
       // 4) AUTO button (favorites pool) — RED when active
@@ -722,19 +709,22 @@
           h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.subBusy }, on: { click: function () { t.delSub(sb.id); } } }, [t._v("Remove")])
         ]);
       });
+      // Unified "add" + subscriptions list (merged the old standalone "Add servers" box in
+      // here, mason): ONE input takes a server link, a list, or a subscription URL — a URL
+      // is tracked + auto-refreshed (addServer routes it to add_sub); links add servers.
       var subsCard = card([
-        sectionTitle("Subscriptions"),
-        h("p", { style: { fontSize: "12px", color: C.se, margin: "0 0 10px" } }, [t._v("Paste a subscription link (VLESS / Reality / Trojan / Shadowsocks / Hysteria2) — all its servers appear above, auto-refreshed every 6 h.")]),
-        h("div", {}, subRows),
-        h("div", { style: { marginTop: "12px" } }, [
-          h("el-input", { staticClass: "r-in", attrs: { value: t.subUrl, placeholder: "Subscription URL (https://…)", size: "small", clearable: true }, on: { input: function (v) { t.subUrl = v; } } }),
-          h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.subName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.subName = v; } } }),
-          h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px", marginTop: "8px" } }, [
-            h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.subBusy }, on: { click: function () { t.addSub(); } } }, [t._v("Add subscription")]),
-            (t.subs && t.subs.length) ? h("gl-button", { staticClass: "btn-item", attrs: { loading: t.refreshingSubs }, on: { click: function () { t.refreshSubs(); } } }, [t._v("Update")]) : null,
-            t.subMsg ? h("span", { style: { color: (t.subOk ? C.gr : C.red), fontSize: "13px" } }, [t._v(t.subMsg)]) : null
-          ])
-        ])
+        sectionTitle("Add servers & subscriptions"),
+        h("p", { style: { fontSize: "12px", color: C.se, margin: "0 0 10px" } }, [t._v("Paste a server link, several (one per line), or a subscription URL (VLESS / Reality / Trojan / Shadowsocks / Hysteria2). Servers appear in the list above; a subscription URL is tracked + auto-refreshed every 6 h.")]),
+        h("el-input", { staticClass: "r-in", attrs: { value: t.addLink, type: "textarea", rows: 3, placeholder: "vless:// or hysteria2://, one per line, or a subscription URL", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
+        h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.addName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.addName = v; } } }),
+        h("div", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px", marginTop: "8px" } }, [
+          h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.adding }, on: { click: function () { t.addServer(); } } }, [t._v("Add")]),
+          (t.subs && t.subs.length) ? h("gl-button", { staticClass: "btn-item", attrs: { loading: t.refreshingSubs }, on: { click: function () { t.refreshSubs(); } } }, [t._v("Update subscriptions")]) : null,
+          t.addMsg ? h("span", { style: { color: (t.addOk ? C.gr : C.red), fontSize: "13px" } }, [t._v(t.addMsg)]) : null,
+          t.subMsg ? h("span", { style: { color: (t.subOk ? C.gr : C.red), fontSize: "13px" } }, [t._v(t.subMsg)]) : null
+        ]),
+        (t.subs && t.subs.length) ? h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#3a3f4b", margin: "16px 0 8px" } }, [t._v("Active subscriptions")]) : null,
+        (t.subs && t.subs.length) ? h("div", {}, subRows) : null
       ]);
 
       var spdLine = t.spd ? h("span", { style: { marginLeft: "12px", fontWeight: "600" } }, [t._v("↓ " + t.spd.down + " · ↑ " + t.spd.up + " Mbit/s")]) : null;
@@ -770,10 +760,8 @@
         autoButton,
         filterCard,
         serversCard,
-        // "Add servers" sits AFTER the server list (mason: more logical — browse/connect
-        // first, add at the bottom).
-        addButton,
-        addPanel,
+        // "Add servers" merged into the subscriptions card below the list (mason): one
+        // place to add a link/list/URL, plus the tracked-subscriptions list.
         subsCard,
         speedCard,
         versionCard
