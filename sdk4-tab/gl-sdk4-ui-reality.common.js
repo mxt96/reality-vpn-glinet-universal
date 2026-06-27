@@ -336,8 +336,23 @@
         // Bulk import (Shadowrocket-style): multi-line list, an http(s) subscription
         // URL, or a base64 blob -> import_links. A single scheme link -> normal add.
         var lines = raw.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
-        var isBulk = lines.length > 1 || /^https?:\/\//i.test(raw) || (lines.length === 1 && raw.indexOf("://") < 0);
         this.adding = true; this.addMsg = "";
+        // De-dup with the Subscriptions card: a single http(s) URL IS a subscription, so
+        // route it to add_sub (stored + auto-refreshed) instead of a one-shot import_links.
+        // Otherwise the same URL behaves differently depending on which box you paste it in.
+        if (lines.length === 1 && /^https?:\/\//i.test(raw)) {
+          call("add_sub", { url: raw, name: (this.addName || "").trim() }).then(function (r) {
+            self.adding = false;
+            if (r && r.ok) {
+              self.addLink = ""; self.addName = ""; self.addOk = true; self.showAdd = false;
+              self.addMsg = "Subscription added — " + (r.added || 0) + " servers";
+              self.loadSubs(); self.loadServers();
+            } else { self.addOk = false; self.addMsg = (r && r.msg) ? r.msg : "Couldn't add subscription"; }
+          }).catch(function () { self.adding = false; self.addOk = false; self.addMsg = "Couldn't add subscription"; });
+          return;
+        }
+        // Bulk import (Shadowrocket-style): multi-line link list or a base64 blob.
+        var isBulk = lines.length > 1 || (lines.length === 1 && raw.indexOf("://") < 0);
         if (isBulk) {
           call("import_links", { text: raw }).then(function (r) {
             self.adding = false;
