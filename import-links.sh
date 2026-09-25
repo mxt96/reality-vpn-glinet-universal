@@ -18,7 +18,11 @@ SRV="$SBDIR/servers"
 DIR=$(cd "$(dirname "$0")" && pwd)
 PARSE="$SBDIR/parse-link.sh"; [ -x "$PARSE" ] || PARSE="$DIR/parse-link.sh"
 REBUILD="$SBDIR/rebuild.sh"; [ -f "$REBUILD" ] || REBUILD="$DIR/rebuild.sh"
-mkdir -p "$SRV"
+mkdir -p "$SBDIR"
+if ! mkdir "$SBDIR/.servers.lock" 2>/dev/null; then echo '{"ok":false,"added":0,"msg":"Server update already running"}'; exit 0; fi
+trap 'rm -f "$SEEN"; rmdir "$SBDIR/.servers.lock" 2>/dev/null' EXIT
+trap 'exit 1' HUP INT TERM
+mkdir -p "$SRV" || exit 1
 
 b64dec(){ # tolerant base64 (url-safe + missing pad). prefer base64, fall back to openssl
   s=$(printf '%s' "$1" | tr '_-' '/+' | tr -d '\n\r \t')
@@ -70,6 +74,8 @@ esac
 
 # 3) iterate non-empty lines that carry a scheme
 ADDED=0; FAILED=0; TAGS=""; FAILED_FILES=""
+SEEN=$(mktemp /tmp/imp-seen.XXXXXX) || { echo '{"ok":false,"added":0,"msg":"Cannot create import workspace"}'; exit 1; }
+
 add_one(){ # add_one <link>  -> writes file, echoes tag on success (no rebuild)
   _l="$1"
   # Skip provider "placeholder" entries: device-locked / unsupported-client panels
@@ -91,8 +97,8 @@ add_one(){ # add_one <link>  -> writes file, echoes tag on success (no rebuild)
   # servers). Identical connection => same key => skipped; different transport/path =>
   # different query string => different key => kept.
   _key=${_l%%#*}
-  if [ -f /tmp/imp-seen ] && grep -qxF "$_key" /tmp/imp-seen 2>/dev/null; then return 1; fi
-  echo "$_key" >> /tmp/imp-seen
+  if [ -f "$SEEN" ] && grep -qxF "$_key" "$SEEN" 2>/dev/null; then return 1; fi
+  echo "$_key" >> "$SEEN"
   _nm=$(printf '%s' "$_l" | sed -n 's/^[^#]*#//p'); _nm=$(urldec "$_nm")
   _base=$(printf '%s' "$_nm" | tr -c 'A-Za-z0-9._-' '_' | sed 's/^_*//; s/_*$//')
   [ -z "$_base" ] && _base="srv-$(date +%s)"
@@ -106,7 +112,7 @@ add_one(){ # add_one <link>  -> writes file, echoes tag on success (no rebuild)
 }
 
 NEWTAGS=""
-: > /tmp/imp-seen   # reset per-run dedup ledger (see add_one)
+: > "$SEEN"   # reset per-run dedup ledger (see add_one)
 OLDIFS=$IFS; IFS='
 '
 for line in $RAW; do
@@ -132,7 +138,7 @@ fi
 # re-add one at a time so the valid ones survive and only the bad ones drop.
 for t in $NEWTAGS; do rm -f "$SRV/$t.json"; done
 ADDED=0; FAILED=0; TAGS=""
-: > /tmp/imp-seen   # reset dedup ledger for the one-by-one fallback pass
+: > "$SEEN"   # reset dedup ledger for the one-by-one fallback pass
 IFS='
 '
 for line in $RAW; do

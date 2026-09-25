@@ -43,42 +43,75 @@ table inet $KS_TABLE {
 }
 NFT
   else
-    # dedicated chain: allowed egress RETURNs (normal firewall then forwards it),
-    # everything else from the LAN is DROPped -> no direct leak.
-    iptables -N "$KS_CHAIN" 2>/dev/null
-    iptables -F "$KS_CHAIN"
-    iptables -A "$KS_CHAIN" -o br-lan   -j RETURN
-    iptables -A "$KS_CHAIN" -o singtun0 -j RETURN
-    iptables -A "$KS_CHAIN" -o tun+     -j RETURN
-    iptables -A "$KS_CHAIN" -o wg+      -j RETURN
-    iptables -A "$KS_CHAIN" -o awg+     -j RETURN
-    iptables -A "$KS_CHAIN" -j DROP
-    iptables -C FORWARD -i br-lan -j "$KS_CHAIN" 2>/dev/null || iptables -I FORWARD -i br-lan -j "$KS_CHAIN"
+    ks_apply_family iptables || return 1
+    if [ -d /proc/sys/net/ipv6 ]; then
+      command -v ip6tables >/dev/null 2>&1 || {
+        echo "Kill switch requires ip6tables to protect IPv6" >&2
+        return 1
+      }
+      ks_apply_family ip6tables || return 1
+    fi
   fi
 }
 
-# Remove the guard from BOTH backends (router may have switched / shim present),
-# plus any legacy single-rule form from earlier versions.
-ks_remove(){
-  nft list table inet "$KS_TABLE" >/dev/null 2>&1 && nft delete table inet "$KS_TABLE" 2>/dev/null
-  while iptables -D FORWARD -i br-lan -j "$KS_CHAIN" 2>/dev/null; do :; done
-  iptables -F "$KS_CHAIN" 2>/dev/null; iptables -X "$KS_CHAIN" 2>/dev/null
-  # legacy rules from the pre-chain version:
-  while iptables -D FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null; do :; done
-  while iptables -D FORWARD -i br-lan -o br-lan -j ACCEPT 2>/dev/null; do :; done
+ks_apply_family(){
+  command -v "$1" >/dev/null 2>&1 || return 1
+  "$1" -nL "$KS_CHAIN" >/dev/null 2>&1 || "$1" -N "$KS_CHAIN" || return 1
+  # Establish DROP before attaching a new chain; never empty an attached guard.
+  "$1" -C "$KS_CHAIN" -j DROP 2>/dev/null || "$1" -A "$KS_CHAIN" -j DROP || return 1
+  for ks_iface in br-lan singtun0 tun+ wg+ awg+; do
+    "$1" -C "$KS_CHAIN" -o "$ks_iface" -j RETURN 2>/dev/null ||
+      "$1" -I "$KS_CHAIN" -o "$ks_iface" -j RETURN || return 1
+  done
+  "$1" -C FORWARD -i br-lan -j "$KS_CHAIN" 2>/dev/null ||
+    "$1" -I FORWARD -i br-lan -j "$KS_CHAIN"
 }
 
-# Is the guard currently installed in the active backend?
+ks_remove_family(){
+  command -v "$1" >/dev/null 2>&1 || return 0
+  "$1" -nL FORWARD >/dev/null 2>&1 || return 1
+  while "$1" -C FORWARD -i br-lan -j "$KS_CHAIN" 2>/dev/null; do
+    "$1" -D FORWARD -i br-lan -j "$KS_CHAIN" || return 1
+  done
+  if "$1" -nL "$KS_CHAIN" >/dev/null 2>&1; then
+    "$1" -F "$KS_CHAIN" && "$1" -X "$KS_CHAIN" || return 1
+  fi
+  while "$1" -C FORWARD -i br-lan ! -o singtun0 -j DROP 2>/dev/null; do
+    "$1" -D FORWARD -i br-lan ! -o singtun0 -j DROP || return 1
+  done
+  while "$1" -C FORWARD -i br-lan -o br-lan -j ACCEPT 2>/dev/null; do
+    "$1" -D FORWARD -i br-lan -o br-lan -j ACCEPT || return 1
+  done
+}
+
+# Remove both backends, including rules from older versions.
+ks_remove(){
+  ks_remove_status=0
+  if command -v nft >/dev/null 2>&1 && nft list table inet "$KS_TABLE" >/dev/null 2>&1; then
+    nft delete table inet "$KS_TABLE" || ks_remove_status=1
+  fi
+  ks_remove_family iptables || ks_remove_status=1
+  ks_remove_family ip6tables || ks_remove_status=1
+  return "$ks_remove_status"
+}
+
+ks_present_family(){
+  "$1" -C FORWARD -i br-lan -j "$KS_CHAIN" 2>/dev/null &&
+    "$1" -C "$KS_CHAIN" -j DROP 2>/dev/null
+}
+
+# A jump alone is insufficient: the target must block, in both IP families.
 ks_present(){
   if ks_is_nft; then nft list table inet "$KS_TABLE" >/dev/null 2>&1; return $?; fi
-  iptables -C FORWARD -i br-lan -j "$KS_CHAIN" 2>/dev/null
+  ks_present_family iptables || return 1
+  if [ -d /proc/sys/net/ipv6 ]; then ks_present_family ip6tables || return 1; fi
 }
 
 # Desired state (user intent) — our own flag is the source of truth; mirror into
 # GL's native killswitch uci when that rule exists so the built-in UI stays in sync.
 ks_desired(){ [ "$(cat "$KS_FLAG" 2>/dev/null)" = "1" ]; }
 ks_set_desired(){
-  echo "$1" > "$KS_FLAG"
+  echo "$1" > "$KS_FLAG" || return 1
   uci -q get route_policy.@rule[0].killswitch >/dev/null 2>&1 && \
     { uci -q set route_policy.@rule[0].killswitch="$1"; uci -q commit route_policy; }
   true

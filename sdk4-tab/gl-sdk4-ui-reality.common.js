@@ -161,7 +161,8 @@
     name: "realityview",
     data: function () {
       return {
-        loaded: false, err: false, busy: false,
+        loaded: false, err: false, busy: false, actionMsg: "",
+        favoritesPending: false, autoPool: "all", autoPoolLoaded: false, search: "", delSubId: "",
         st: {},                 // last get_status result
         vpnOn: false, ksOn: false, tunneled: false,
         servers: [], serversLoaded: false,
@@ -186,8 +187,7 @@
       this.checkUpdate();
       var self = this;
       this._timer = setInterval(function () { if (!self.busy) self.refresh(); }, 15000);
-      // live traffic: poll fast (every 2s) so the user can SEE data flowing through
-      // the tunnel = proof the connection is real. Cheap single clash call.
+      // Traffic counters are separate from end-to-end connection health.
       this._trafPrev = null;
       this._trafTimer = setInterval(function () { self.pollTraffic(); }, 2000);
       this.pollTraffic();
@@ -202,9 +202,9 @@
           if (r && r.err_msg) { self.err = true; return; }
           self.err = false; self.st = r || {};
           self.vpnOn = !!self.st.running; self.ksOn = !!self.st.killswitch;
-          // "tunneled" = a real server is actually carrying traffic, not just the
-          // sing-box process being alive. With no server the config routes DIRECT,
-          // so running===true but active==="direct" must NOT read as "protected".
+          self.favoritesPending = !!self.st.favorites_pending;
+          if (!self.autoPoolLoaded) { self.autoPool = self.st.mode === "auto-fav" ? "fav" : "all"; self.autoPoolLoaded = true; }
+          // A selected outbound is not proof of a working connection.
           self.tunneled = !!self.st.running && !!self.st.active && self.st.active !== "direct";
         }).catch(function () { self.spinning = false; self.loaded = true; self.err = true; });
       },
@@ -212,9 +212,10 @@
         var self = this;
         return call("list_servers").then(function (r) {
           self.serversLoaded = true;
+          var wasAll = !self.ccInit || self.servers.every(function (sv) { return self.ccSel[detectCC(sv.tag) || "?"]; });
           self.servers = (r && r.servers) ? r.servers : [];
           // First load: pre-select ALL detected countries so the list shows everything.
-          if (!self.ccInit && self.servers.length) {
+          if (wasAll && self.servers.length) {
             var sel = {};
             self.servers.forEach(function (sv) { sel[detectCC(sv.tag) || "?"] = 1; });
             self.ccSel = sel; self.ccInit = true;
@@ -248,8 +249,10 @@
         }).catch(function () { self.subBusy = false; self.subOk = false; self.subMsg = "Couldn't add subscription"; });
       },
       delSub: function (id) {
-        var self = this; this.subBusy = true;
-        call("del_sub", { id: id }).then(function () {
+        if (this.delSubId !== id) { this.delSubId = id; return; }
+        var self = this; this.subBusy = true; this.delSubId = "";
+        call("del_sub", { id: id }).then(function (r) {
+          if (!r || !r.ok) { self.subOk = false; self.subMsg = (r && r.msg) || "Could not delete subscription"; }
           self.subBusy = false; self.loadSubs(); self.loadServers();
         }).catch(function () { self.subBusy = false; self.loadSubs(); self.loadServers(); });
       },
@@ -281,33 +284,36 @@
       },
       toggleVpn: function (val) {
         var self = this; this.busy = true; this.vpnOn = val;
-        call("set_enabled", { on: val }).then(function () {
+        call("set_enabled", { on: val }).then(function (r) {
+          if (!r || !r.ok) throw new Error((r && r.msg) || "Could not change VPN state");
           setTimeout(function () { self.busy = false; self.refresh(); }, val ? 2500 : 3500);
-        }).catch(function () { self.busy = false; self.refresh(); });
+        }).catch(function (err) { self.busy = false; self.actionMsg = err.message; self.refresh(); });
       },
       toggleKs: function (val) {
         var self = this; this.busy = true; this.ksOn = val;
-        call("set_killswitch", { on: val }).then(function () {
+        call("set_killswitch", { on: val }).then(function (r) {
+          if (!r || !r.ok) throw new Error((r && r.msg) || "Could not change internet blocking");
           self.busy = false; self.refresh();
-        }).catch(function () { self.busy = false; self.refresh(); });
+        }).catch(function (err) { self.busy = false; self.actionMsg = err.message; self.refresh(); });
       },
       setProto: function (key) {
         if (this.busy) return;
-        var self = this; this.busy = true;
-        function doSel() {
-          call("set_proto", { proto: key }).then(function () {
-            setTimeout(function () { self.busy = false; self.refresh(); }, 2500);
-          }).catch(function () { self.busy = false; self.refresh(); });
+        var self = this; this.busy = true; this.actionMsg = "";
+        function fail(err) {
+          self.busy = false; self.actionMsg = err.message || "Could not change VPN connection"; self.refresh();
         }
-        // If the VPN is OFF, selecting a server / Auto has no effect — there's no running
-        // sing-box (clash API down) to apply the selection, so the tap silently did
-        // nothing. Tapping a server should CONNECT to it: turn the tunnel on first, give
-        // it time to come up, then apply the selection.
+        function doSel() {
+          call("set_proto", { proto: key }).then(function (r) {
+            if (!r || !r.ok) throw new Error((r && r.msg) || "Could not select server");
+            setTimeout(function () { self.busy = false; self.refresh(); }, 2500);
+          }).catch(fail);
+        }
         if (!this.vpnOn) {
-          this.vpnOn = true;
-          call("set_enabled", { on: true }).then(function () {
+          call("set_enabled", { on: true }).then(function (r) {
+            if (!r || !r.ok) throw new Error((r && r.msg) || "Could not enable VPN");
+            self.vpnOn = true;
             setTimeout(doSel, 3000);
-          }).catch(function () { self.busy = false; self.refresh(); });
+          }).catch(fail);
         } else {
           doSel();
         }
@@ -324,9 +330,17 @@
       },
       setPr: function (key) { this.prSel = key; },
       goAuto: function () {
-        // Auto over the favorites pool. Backend falls back to plain "auto" if the
-        // auto-fav urltest group isn't present (no favorites yet).
-        this.setProto("auto-fav");
+        if (this.busy || !this.servers.length) return;
+        if (this.autoPool === "fav" && !this.servers.some(function (sv) { return sv.fav; })) {
+          this.actionMsg = "Add a favorite server or choose All servers."; return;
+        }
+        var key = this.autoPool === "fav" ? "auto-fav" : "auto";
+        if (!this.favoritesPending) { this.setProto(key); return; }
+        var self = this; this.busy = true; this.actionMsg = "";
+        call("apply_favorites").then(function (r) {
+          if (!r || !r.ok) throw new Error((r && r.msg) || "Could not apply favorites");
+          self.favoritesPending = false; self.busy = false; self.setProto(key);
+        }).catch(function (err) { self.busy = false; self.actionMsg = err.message; });
       },
       addServer: function () {
         var self = this; var raw = (this.addLink || "").trim();
@@ -377,7 +391,7 @@
         }).catch(function () { self.busy = false; self.cancelEdit(); self.loadServers(); });
       },
       // Two-tap delete on a server row: first tap on the small ✕ arms the row
-      // (turns into "Удалить?"), second tap confirms -> delServer. confirm() is
+      // (turns into "Delete?"), second tap confirms -> delServer. confirm() is
       // unreliable in GL's webview, so we use this in-UI confirm instead.
       armDel: function (tag) {
         var self = this;
@@ -388,21 +402,24 @@
         this._delTimer = setTimeout(function () { if (self.delTag === tag) self.delTag = ""; }, 3500);
       },
       setFav: function (sv) {
-        // Toggle ★ on a server. Backend writes /etc/sing-box/favorites + rebuilds the
-        // "auto-fav" urltest pool. Optimistic UI; reload to reflect the rebuilt list.
-        var self = this; var newOn = !sv.fav; sv.fav = newOn;
-        call("set_fav", { tag: sv.tag, on: newOn ? 1 : 0 }).then(function () { self.loadServers(); })
-          .catch(function () { sv.fav = !newOn; });
+        if (this.busy) return;
+        var self = this; this.busy = true; this.actionMsg = "";
+        call("set_fav", { tag: sv.tag, on: sv.fav ? 0 : 1 }).then(function (r) {
+          if (!r || !r.ok) throw new Error((r && r.msg) || "Could not save favorite");
+          self.favoritesPending = true;
+          return self.loadServers();
+        }).catch(function (err) { self.actionMsg = err.message; })
+          .then(function () { self.busy = false; });
       },
       setFavBulk: function (tags, on) {
-        // Star/unstar MANY servers at once = the currently-shown (filtered) set, so the
-        // "Auto ★" pool becomes exactly your filter in one tap. ONE backend rebuild, not N
-        // (matters with 100+ servers from a subscription).
-        if (!tags || !tags.length) return;
-        var self = this; this.busy = true;
-        call("set_fav_bulk", { tags: tags, on: on ? 1 : 0 })
-          .then(function () { self.busy = false; self.loadServers(); })
-          .catch(function () { self.busy = false; self.loadServers(); });
+        if (this.busy || !tags || !tags.length) return;
+        var self = this; this.busy = true; this.actionMsg = "";
+        call("set_fav_bulk", { tags: tags, on: on ? 1 : 0 }).then(function (r) {
+          if (!r || !r.ok) throw new Error((r && r.msg) || "Could not save favorites");
+          self.favoritesPending = true;
+          return self.loadServers();
+        }).catch(function (err) { self.actionMsg = err.message; })
+          .then(function () { self.busy = false; });
       },
       // edit-server UI was removed (rows are tap-to-connect + ✕-delete); cancelEdit is
       // kept only to reset the delete/edit state from delServer.
@@ -466,7 +483,8 @@
         ]);
       }
       function chip(children, on, onclick) {
-        return h("span", {
+        return h("button", {
+          attrs: { type: "button", "aria-pressed": on },
           style: {
             border: "1px solid " + (on ? C.blue : "#d7dbe4"), borderRadius: "999px", padding: "6px 12px",
             fontSize: "13px", fontWeight: "600", background: on ? C.blue : "#fff", color: on ? "#fff" : C.tx,
@@ -475,44 +493,16 @@
           on: { click: onclick }
         }, children);
       }
-      function pillBtn(label, badge, opts) {
-        opts = opts || {};
-        var active = opts.active;
-        return h("div", {
-          style: {
-            fontSize: "14px", fontWeight: "700", borderRadius: "22px", padding: "12px 18px",
-            border: "1.5px solid " + (active ? C.red : "#cdd2de"), background: active ? C.red : "#fff",
-            color: active ? "#fff" : C.blue, cursor: "pointer", width: "100%", display: "flex",
-            alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "13px", userSelect: "none"
-          },
-          on: { click: opts.onClick }
-        }, [
-          t._v(label),
-          badge != null ? h("span", {
-            style: {
-              marginLeft: "auto", fontSize: "11px", fontWeight: "800", padding: "3px 9px", borderRadius: "999px",
-              background: active ? "rgba(255,255,255,.22)" : C.bluebg, color: active ? "#fff" : C.blue
-            }
-          }, [t._v(badge)]) : null
-        ]);
-      }
-
       // ======================================================================
       // 1) NETWORK STATUS HEADER
       // ======================================================================
       var tun = t.tunneled;
-      // VPN off but we still know the real (direct) egress from get_status/geo cache ->
-      // show the CURRENT (direct) connection instead of blank dashes (mason's bug:
-      // "когда впн выключен то данные по текущему подключению не определяются").
       var hasGeo = !!(s.egress || s.country);
-      var direct = !tun && hasGeo;          // VPN off, internet up: show the direct egress
-      var live = tun || direct;
-      var activeSv = (t.servers || []).filter(function (x) { return x.tag === s.active; })[0];
+      var live = hasGeo && !t.err;
       var hdrCC = detectCC(s.country || s.active || "");
-      var hdrFlag = !live ? "🚫" : (isoFlag(hdrCC) || "🌐");
-      var hdrCountry = !live ? "Not connected" : (CC_RU[hdrCC] || s.country || "—");
-      var hdrProto = tun ? (activeSv ? famLabel(famOf(activeSv)) : (s.protocol || "")) : "Direct (no VPN)";
-      var hdrSub = !live ? "—" : ([s.city, hdrProto].filter(Boolean).join(" · ") || "—");
+      var hdrFlag = isoFlag(hdrCC) || "🌐";
+      var hdrCountry = t.err ? "Status unavailable" : !t.loaded ? "Loading…" : t.busy ? "Applying changes…" : t.vpnOn ? "VPN enabled" : s.killswitch_active ? "Direct internet blocked" : "VPN off";
+      var hdrSub = t.vpnOn ? (s.active && s.active !== "direct" ? "Selected: " + s.active : "No VPN server selected") : s.killswitch_active ? "Client devices must use a VPN; router and local access remain available" : "Internet blocking is off";
 
       function cell(label, valNode, borderRight) {
         return h("div", { style: { padding: "11px 16px", borderTop: "1px solid " + C.line, borderRight: borderRight ? "1px solid " + C.line : "none" } }, [
@@ -539,17 +529,11 @@
             h("div", { style: { fontSize: "17px", fontWeight: "800" } }, [t._v(hdrCountry)]),
             h("div", { style: { fontSize: "12.5px", color: C.se, marginTop: "1px" } }, [t._v(hdrSub)])
           ]),
-          tun ? h("span", { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", color: C.gr, background: "#e8f8f0", padding: "4px 10px", borderRadius: "999px" } }, [
-            h("span", { style: { width: "8px", height: "8px", borderRadius: "50%", background: C.gr } }),
-            t._v("Online")
-          ]) : (direct ? h("span", { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "700", color: "#b9821a", background: "#fff6e6", padding: "4px 10px", borderRadius: "999px" } }, [
-            h("span", { style: { width: "8px", height: "8px", borderRadius: "50%", background: "#d98a00" } }),
-            t._v("No VPN")
-          ]) : null)
+          h("span", { style: { fontSize: "11px", color: C.ye, background: "#fff6e6", padding: "4px 10px", borderRadius: "12px" } }, [t._v(t.vpnOn ? "Connection not verified" : "VPN off")])
         ]),
         h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr" } }, [
-          cell("IP", live ? val(s.egress) : dim(), true),
-          cell("PING", pingNode, false),
+          cell("LAST REPORTED IP", live ? val(s.egress) : dim(), true),
+          cell("LAST REPORTED LATENCY", pingNode, false),
           cell("DOWNLOAD ↓", dnNode, true),
           cell("UPLOAD ↑", upNode, false)
         ])
@@ -560,7 +544,7 @@
       // ======================================================================
       function toggleRow(label, sub, value, handler) {
         return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, [
-          h("div", [
+          h("div", { style: { flex: "1", minWidth: "0", paddingRight: "12px" } }, [
             h("div", { style: { fontSize: "14px", fontWeight: "600" } }, [t._v(label)]),
             sub ? h("div", { style: { fontSize: "12px", color: C.se, marginTop: "2px" } }, [t._v(sub)]) : null
           ]),
@@ -568,19 +552,31 @@
         ]);
       }
       var controlsCard = card([
-        toggleRow("VPN", t.tunneled ? "Tunnel active" : (t.vpnOn ? "Running — no server (direct)" : "Tunnel stopped"), t.vpnOn, function (v) { t.toggleVpn(v); }),
+        toggleRow("Enable VPN", "A selected server does not confirm internet connectivity", t.vpnOn, function (v) { t.toggleVpn(v); }),
         h("div", { style: { height: "1px", background: C.line, margin: "12px 0" } }),
-        toggleRow("Kill switch", "Block LAN if the tunnel drops", t.ksOn, function (v) { t.toggleKs(v); })
+        toggleRow("Block internet without VPN", "For client devices, even when this VPN is off. Other VPN connections and local access remain available.", t.ksOn, function (v) { t.toggleKs(v); }),
+        t.loaded && !t.err && t.ksOn && !s.killswitch_active ? h("p", { attrs: { role: "alert" }, style: { color: C.red, fontSize: "12px" } }, [t._v("Internet blocking is not active. Re-enable it and check the router firewall.")]) : null
       ]);
 
       // (Add-servers input was merged into the subscriptions card below the list.)
 
       // ======================================================================
-      // 4) AUTO button (favorites pool) — RED when active
+      // 4) AUTOMATIC SELECTION
       // ======================================================================
       var favCount = (t.servers || []).filter(function (x) { return x.fav; }).length;
       var autoActive = isAutoMode(s.mode);
-      var autoButton = pillBtn("⟳ Auto", favCount + " in pool", { active: autoActive, onClick: function () { t.goAuto(); } });
+      var selectedPool = t.autoPool === "fav" ? "auto-fav" : "auto";
+      var autoButton = h("div", { style: { background: C.bluebg, border: "1px solid #bdc9ef", borderRadius: "8px", padding: "14px", marginBottom: "14px" } }, [
+        ctitle("Automatic server selection", autoActive ? "Selected: " + (s.mode === "auto-fav" ? "Favorites" : s.mode === "auto" ? "All servers" : s.mode === "auto-reality" ? "Reality servers" : "Hysteria2 servers") : "Manual selection"),
+        h("div", { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" } }, [
+          h("select", { attrs: { "aria-label": "Automatic selection pool", disabled: t.busy }, domProps: { value: t.autoPool }, style: { maxWidth: "100%", padding: "8px", border: "1px solid #cdd2de", borderRadius: "5px" }, on: { change: function (e) { t.autoPool = e.target.value; } } }, [
+            h("option", { attrs: { value: "all" } }, [t._v("All servers · " + t.servers.length)]),
+            h("option", { attrs: { value: "fav", disabled: !favCount } }, [t._v("Favorites · " + favCount)])
+          ]),
+          h("gl-button", { attrs: { type: "primary", disabled: t.busy || !t.servers.length || (t.autoPool === "fav" && !favCount) || (!t.favoritesPending && t.vpnOn && s.mode === selectedPool) }, on: { click: function () { t.goAuto(); } } }, [t._v(t.favoritesPending ? "Apply and reconnect" : (t.vpnOn && s.mode === selectedPool ? "Selected" : "Connect"))])
+        ]),
+        t.favoritesPending ? h("p", { style: { fontSize: "12px", color: C.ye, margin: "10px 0 0" } }, [t._v("Favorites saved. Your current connection is unchanged. Apply to update the automatic selection pool.")]) : null
+      ]);
 
       // ======================================================================
       // 5) FILTER card (country chips + protocol chips)
@@ -601,7 +597,9 @@
       var prChips = PR.map(function (o) {
         return chip([t._v(o[1])], t.prSel === o[0], function () { t.setPr(o[0]); });
       });
-      var filterCard = card([
+      var filterCard = h("details", { style: { padding: "12px 0" } }, [
+        h("summary", { style: { cursor: "pointer", color: C.blue, marginBottom: "10px" } }, [t._v("List filters")]),
+        h("p", { style: { color: C.se, fontSize: "12px" } }, [t._v("Filters only change the list below. They do not change the automatic selection pool.")]),
         ctitle("Country"),
         h("div", { style: { display: "flex", flexWrap: "wrap", gap: "7px" } }, ccChips),
         h("div", { style: { fontSize: "13px", fontWeight: "700", color: "#3a3f4b", margin: "14px 0 12px" } }, [t._v("Protocol")]),
@@ -615,13 +613,13 @@
         var c = detectCC(sv.tag) || "?";
         if (!t.ccSel[c]) return false;
         if (t.prSel !== "all" && famOf(sv) !== t.prSel) return false;
-        return true;
+        return (sv.tag + " " + (CC_RU[c] || "")).toLowerCase().indexOf(t.search.toLowerCase()) !== -1;
       });
       function srvActive(tag) { return s.mode === tag || (isAutoMode(s.mode) && s.active === tag); }
 
       var rows;
       if (!t.serversLoaded) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("Loading…")])];
-      else if (!t.servers.length) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("No servers yet. Add some above.")])];
+      else if (!t.servers.length) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("No servers yet. Add a link or subscription below.")])];
       else if (!shown.length) rows = [h("div", { style: { fontSize: "13px", color: C.se, padding: "10px 0" } }, [t._v("No servers match the filter.")])];
       else {
         rows = shown.map(function (sv, idx) {
@@ -639,29 +637,33 @@
               display: "flex", alignItems: "center", gap: "11px", padding: "11px 2px", cursor: "pointer",
               borderBottom: last ? "none" : "1px solid " + C.line
             }, isPick ? { background: C.bluebg, margin: "0 -8px", padding: "11px 10px", borderRadius: "9px", borderBottom: "none" } : {}),
-            on: { click: function () { if (!t.busy && s.mode !== sv.tag) t.setProto(sv.tag); } }
+            on: { click: function () { if (!t.busy && (!t.vpnOn || s.mode !== sv.tag)) t.setProto(sv.tag); } }
           }, [
-            h("span", {
-              style: { fontSize: "20px", lineHeight: "1", width: "21px", textAlign: "center", color: sv.fav ? "#f0a500" : "#cdd2da" },
+            h("button", {
+              attrs: { type: "button", disabled: t.busy, "aria-label": (sv.fav ? "Remove favorite: " : "Add favorite: ") + name },
+              style: { border: "0", background: "none", padding: "0", cursor: "pointer", flexShrink: "0", fontSize: "20px", lineHeight: "1", width: "21px", textAlign: "center", color: sv.fav ? "#f0a500" : "#cdd2da" },
               on: { click: function (e) { e.stopPropagation(); if (!t.busy) t.setFav(sv); } }
             }, [t._v(sv.fav ? "★" : "☆")]),
             h("div", { style: { flex: "1", minWidth: "0" } }, [
-              h("div", { style: { fontSize: "14px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" } }, [
+              h("div", { style: { fontSize: "14px", fontWeight: "600", display: "flex", flexWrap: "wrap", overflowWrap: "anywhere", alignItems: "center", gap: "6px" } }, [
                 t._v(fl + " " + name),
-                nowTag ? h("span", { style: { color: C.blue, fontWeight: "800", fontSize: "11px" } }, [t._v("● now")]) : null
+                nowTag ? h("span", { style: { color: C.blue, fontWeight: "800", fontSize: "11px" } }, [t._v("● selected")]) : null
               ]),
-              h("div", { style: { fontSize: "11.5px", color: C.se, marginTop: "2px" } }, [t._v(famLabel(famOf(sv)) + " · " + (sv.server || ""))])
+              h("div", { style: { fontSize: "11.5px", color: C.se, marginTop: "2px" } }, [t._v(CC_RU[cc] || "Location unknown")])
             ]),
             h("span", { style: { fontSize: "13px", fontWeight: "800", whiteSpace: "nowrap", color: pingClr } }, [t._v(pingTxt)]),
-            // quiet trailing delete: small grey ✕; first tap arms -> "Удалить?",
+            h("button", { attrs: { type: "button", disabled: t.busy || (t.vpnOn && s.mode === sv.tag) }, style: { border: "1px solid #d7dbe4", background: "white", color: C.blue, padding: "5px 7px", borderRadius: "5px", fontSize: "11px" }, on: { click: function (e) { e.stopPropagation(); t.setProto(sv.tag); } } }, [t._v(t.vpnOn && s.mode === sv.tag ? "Selected" : "Connect")]),
+            // quiet trailing delete: small grey ✕; first tap arms -> "Delete?",
             // second tap confirms. stopPropagation so the row body still connects.
             (t.delTag === sv.tag)
-              ? h("span", {
-                  style: { fontSize: "12px", fontWeight: "700", color: C.red, whiteSpace: "nowrap", cursor: "pointer", padding: "2px 4px", userSelect: "none" },
+              ? h("button", {
+                  attrs: { type: "button", disabled: t.busy, "aria-label": "Confirm deletion: " + name },
+                  style: { border: "0", background: "none", fontSize: "12px", fontWeight: "700", color: C.red, whiteSpace: "nowrap", cursor: "pointer", padding: "2px 4px", userSelect: "none" },
                   on: { click: function (e) { e.stopPropagation(); if (!t.busy) t.armDel(sv.tag); } }
                 }, [t._v("Delete?")])
-              : h("span", {
-                  style: { fontSize: "15px", lineHeight: "1", color: "#c4c8d2", cursor: "pointer", padding: "2px 4px", userSelect: "none" },
+              : h("button", {
+                  attrs: { type: "button", disabled: t.busy, "aria-label": "Delete server: " + name },
+                  style: { border: "0", background: "none", fontSize: "15px", lineHeight: "1", color: "#c4c8d2", cursor: "pointer", padding: "2px 4px", userSelect: "none" },
                   on: { click: function (e) { e.stopPropagation(); if (!t.busy) t.armDel(sv.tag); } }
                 }, [t._v("✕")])
           ]);
@@ -669,15 +671,19 @@
       }
 
       var bulkRow = (t.servers && t.servers.length && shown.length) ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" } }, [
-        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 1); } } }, [t._v("★ all shown")]),
-        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 0); } } }, [t._v("Clear ★")]),
-        h("gl-button", { staticClass: "btn-item", attrs: { loading: t.pinging }, on: { click: function () { t.pingServers(); } } }, [t._v("Ping")])
+        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 1); } } }, [t._v("Favorite shown")]),
+        h("gl-button", { staticClass: "btn-item", attrs: { type: "default", disabled: t.busy }, on: { click: function () { t.setFavBulk(shown.map(function (x) { return x.tag; }), 0); } } }, [t._v("Unfavorite shown")]),
+        h("gl-button", { staticClass: "btn-item", attrs: { loading: t.pinging }, on: { click: function () { t.pingServers(); } } }, [t._v("Check latency")])
       ]) : null;
 
       var serversCard = card([
         ctitle("Servers", (t.servers && t.servers.length) ? ("showing " + shown.length + " of " + t.servers.length) : null),
+        autoButton,
+        h("el-input", { attrs: { value: t.search, placeholder: "Find a server", "aria-label": "Find a server", size: "small" }, on: { input: function (v) { t.search = v; } } }),
+        filterCard,
         h("div", {}, rows),
-        bulkRow
+        bulkRow,
+        h("p", { style: { color: C.se, fontSize: "12px" } }, [t._v("Favorites do not reconnect VPN. Select a server row to connect.")])
       ]);
 
       // ======================================================================
@@ -706,14 +712,16 @@
         if (meta.length) kids.push(h("div", { style: { fontSize: "12px", color: C.se } }, [t._v(meta.join(" · "))]));
         return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid " + C.line } }, [
           h("div", { style: { minWidth: "0" } }, kids),
-          h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.subBusy }, on: { click: function () { t.delSub(sb.id); } } }, [t._v("Remove")])
+          h("gl-button", { staticClass: "btn-item", attrs: { type: "abort", disabled: t.subBusy }, on: { click: function () { t.delSub(sb.id); } } }, [t._v(t.delSubId === sb.id ? "Confirm deletion" : "Delete")]),
+          t.delSubId === sb.id ? h("gl-button", { attrs: { disabled: t.subBusy }, on: { click: function () { t.delSubId = ""; } } }, [t._v("Cancel")]) : null
         ]);
       });
       // Unified "add" + subscriptions list (merged the old standalone "Add servers" box in
       // here, mason): ONE input takes a server link, a list, or a subscription URL — a URL
       // is tracked + auto-refreshed (addServer routes it to add_sub); links add servers.
       var subsCard = card([
-        sectionTitle("Add servers & subscriptions"),
+        sectionTitle("Subscriptions and servers"),
+        t.delSubId ? h("p", { style: { color: C.ye, fontSize: "12px" } }, [t._v("Deleting a subscription removes its servers and may interrupt VPN. The internet blocking setting is unchanged.")]) : null,
         h("p", { style: { fontSize: "12px", color: C.se, margin: "0 0 10px" } }, [t._v("Paste a server link, several (one per line), or a subscription URL (VLESS / Reality / Trojan / Shadowsocks / Hysteria2). Servers appear in the list above; a subscription URL is tracked + auto-refreshed every 6 h.")]),
         h("el-input", { staticClass: "r-in", attrs: { value: t.addLink, type: "textarea", rows: 3, placeholder: "vless:// or hysteria2://, one per line, or a subscription URL", size: "small" }, on: { input: function (v) { t.addLink = v; } } }),
         h("el-input", { staticClass: "r-in", style: { marginTop: "8px" }, attrs: { value: t.addName, placeholder: "Name (optional)", size: "small" }, on: { input: function (v) { t.addName = v; } } }),
@@ -730,6 +738,7 @@
       var spdLine = t.spd ? h("span", { style: { marginLeft: "12px", fontWeight: "600" } }, [t._v("↓ " + t.spd.down + " · ↑ " + t.spd.up + " Mbit/s")]) : null;
       var speedCard = card([
         sectionTitle("Speed test"),
+        h("p", { style: { color: C.se, fontSize: "12px" } }, [t._v("This test uses data and may affect connection speed while it runs.")]),
         h("div", { style: { display: "flex", alignItems: "center" } }, [
           h("gl-button", { attrs: { type: "primary", loading: t.spdRunning }, on: { click: function () { t.runSpeedtest(); } } }, [t._v(t.spdRunning ? "Testing…" : "Run test")]),
           spdLine
@@ -737,7 +746,7 @@
       ]);
 
       var versionCard = card([
-        sectionTitle("Version"),
+        sectionTitle("Software updates"),
         kv("Installed", t.ver.installed || (t.verLoaded ? "unknown" : "…")),
         kv("Latest", t.ver.latest || (t.verLoaded ? "unknown" : "…")),
         h("div", { style: { marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" } }, [
@@ -754,17 +763,20 @@
       else if (t.err) banner = h("div", { staticClass: "status-tips is-warning" }, [h("span", { staticClass: "iconfont icon-warning" }), h("p", [t._v("Couldn't read tunnel status.")])]);
 
       return h("div", { staticClass: "reality-wrapper" }, [
+        h("h2", { style: { margin: "0 0 16px", fontSize: "22px" } }, [t._v("Sing-box VPN")]),
         banner,
         netCard,
         controlsCard,
-        autoButton,
-        filterCard,
+        t.actionMsg ? h("p", { attrs: { role: "alert" }, style: { color: C.red } }, [t._v(t.actionMsg)]) : null,
         serversCard,
         // "Add servers" merged into the subscriptions card below the list (mason): one
         // place to add a link/list/URL, plus the tracked-subscriptions list.
         subsCard,
-        speedCard,
-        versionCard
+        h("details", { style: { marginTop: "14px" } }, [
+          h("summary", { style: { cursor: "pointer", color: C.blue, fontWeight: "600", padding: "12px 0" } }, [t._v("Advanced")]),
+          speedCard,
+          versionCard
+        ])
       ]);
     }
   };
