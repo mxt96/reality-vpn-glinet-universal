@@ -27,7 +27,7 @@ SUBS="$SBDIR/subs"
 DIR=$(cd "$(dirname "$0")" && pwd)
 IMPORT="$SBDIR/import-links.sh"; [ -x "$IMPORT" ] || IMPORT="$DIR/import-links.sh"
 REBUILD="$SBDIR/rebuild.sh"; [ -f "$REBUILD" ] || REBUILD="$DIR/rebuild.sh"
-mkdir -p "$SRV" "$SUBS"
+mkdir -p "$SUBS"
 
 now(){ date +%s 2>/dev/null || echo 0; }
 jstr(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -54,30 +54,88 @@ grab_meta(){
 # slug: lower, keep alnum._-, collapse the rest to '-'
 slug(){ printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9._-' '-' | sed 's/^-*//; s/-*$//' | cut -c1-40; }
 
-# pull <id> <url> : delete the sub's old servers, import fresh, record new tags.
-# Echoes "added removed" counts. Does NOT rebuild per-server — import-links does ONE
-# rebuild at the end, which is enough (deletes are just file removals before it).
-pull(){
-  _id="$1"; _url="$2"; _removed=0
+# Stage the complete candidate set; a failed fetch or check never touches live files.
+pull() (
+  _id="$1"; _url="$2"; _removed=0; _committed=0; _metadata=0
+  _stage=$(mktemp -d "$SBDIR/.sub-stage.XXXXXX") || return 1
+  cleanup(){
+    if [ "$_committed" = 0 ] && [ -d "$_stage/previous" ]; then
+      if [ -d "$SRV" ] && ! mv "$SRV" "$_stage/rejected"; then return 1; fi
+      mv "$_stage/previous" "$SRV" || return 1
+      sh "$REBUILD" >/dev/null 2>&1
+    fi
+    if [ "$_committed" = 0 ] && [ "$_metadata" = 1 ]; then
+      for _ext in tags upd url; do
+        if [ -f "$_stage/old.$_ext" ]; then
+          mv "$_stage/old.$_ext" "$SUBS/$_id.$_ext" || return 1
+        else
+          rm -f "$SUBS/$_id.$_ext" || return 1
+        fi
+      done
+    fi
+    find "$_stage" -depth -delete
+  }
+  trap cleanup EXIT
+  trap 'exit 1' HUP INT TERM
+  mkdir "$_stage/servers" || return 1
+  for _f in "$SRV/"*.json; do
+    [ -f "$_f" ] || continue
+    cp -p "$_f" "$_stage/servers/" || return 1
+  done
+  if [ -f "$SBDIR/favorites" ]; then cp "$SBDIR/favorites" "$_stage/favorites" || return 1; fi
+  if [ -x "$SBDIR/sing-box" ]; then ln -s "$SBDIR/sing-box" "$_stage/sing-box" || return 1; fi
   if [ -f "$SUBS/$_id.tags" ]; then
     while IFS= read -r _t; do
-      [ -z "$_t" ] && continue
-      [ -f "$SRV/$_t.json" ] && { rm -f "$SRV/$_t.json"; _removed=$((_removed+1)); }
+      case "$_t" in ""|*[!A-Za-z0-9._-]*) continue ;; esac
+      if [ -f "$_stage/servers/$_t.json" ]; then
+        rm -f "$_stage/servers/$_t.json" || return 1
+        _removed=$((_removed+1))
+      fi
     done < "$SUBS/$_id.tags"
   fi
-  # import-links prints {"ok":..,"added":N,..,"tags":["a","b"]}
-  _out=$(printf '%s' "$_url" | env SBDIR="$SBDIR" sh "$IMPORT" 2>/dev/null)
+  cp "$REBUILD" "$_stage/rebuild.sh" || return 1
+  _out=$(printf '%s' "$_url" | env SBDIR="$_stage" REBUILD_CHECK_ONLY=1 sh "$IMPORT" 2>/dev/null) || return 1
   _added=$(printf '%s' "$_out" | sed -n 's/.*"added":\([0-9]*\).*/\1/p')
-  [ -z "$_added" ] && _added=0
-  # extract tags array -> newline list
+  if ! printf '%s' "$_out" | grep -q '"ok":true' || [ "${_added:-0}" -eq 0 ]; then return 1; fi
   printf '%s' "$_out" | sed -n 's/.*"tags":\[\([^]]*\)\].*/\1/p' \
-    | tr ',' '\n' | sed 's/^"//; s/"$//' | grep . > "$SUBS/$_id.tags" 2>/dev/null
-  now > "$SUBS/$_id.upd"
+    | tr ',' '\n' | sed 's/^"//; s/"$//' | grep . > "$_stage/tags" || return 1
+  [ "$(wc -l < "$_stage/tags" | tr -d ' ')" -eq "$_added" ] || return 1
+  while IFS= read -r _t; do
+    case "$_t" in ""|*[!A-Za-z0-9._-]*) return 1 ;; esac
+    [ -s "$_stage/servers/$_t.json" ] || return 1
+  done < "$_stage/tags"
+  now > "$_stage/upd" || return 1
+  if [ "$#" -ge 3 ]; then
+    printf '%s\n%s\n' "$3" "$_url" > "$_stage/url" || return 1
+  elif [ -f "$SUBS/$_id.url" ]; then
+    cp "$SUBS/$_id.url" "$_stage/url" || return 1
+  fi
+  for _ext in tags upd url; do
+    if [ -f "$SUBS/$_id.$_ext" ]; then cp "$SUBS/$_id.$_ext" "$_stage/old.$_ext" || return 1; fi
+  done
+  mv "$SRV" "$_stage/previous" || return 1
+  mv "$_stage/servers" "$SRV" || return 1
+  _result=$(sh "$REBUILD" 2>/dev/null | head -1)
+  [ "$_result" = OK ] || return 1
+  _metadata=1
+  mv "$_stage/tags" "$SUBS/$_id.tags" || return 1
+  mv "$_stage/upd" "$SUBS/$_id.upd" || return 1
+  if [ -f "$_stage/url" ]; then mv "$_stage/url" "$SUBS/$_id.url" || return 1; fi
+  _committed=1
   grab_meta "$_id" "$_url"
   printf '%s %s' "$_added" "$_removed"
-}
+)
 
 CMD="$1"; shift 2>/dev/null
+
+case "$CMD" in
+  add|del|refresh)
+    if ! mkdir "$SBDIR/.servers.lock" 2>/dev/null; then echo '{"ok":false,"msg":"Server update already running"}'; exit 0; fi
+    trap 'rmdir "$SBDIR/.servers.lock" 2>/dev/null' EXIT
+    trap 'exit 1' HUP INT TERM
+    mkdir -p "$SRV" || exit 1
+    ;;
+esac
 
 case "$CMD" in
   add)
@@ -89,14 +147,11 @@ case "$CMD" in
     if [ -f "$SUBS/$ID.url" ] && [ "$(sed -n 2p "$SUBS/$ID.url")" != "$URL" ]; then
       _i=1; while [ -f "$SUBS/$ID-$_i.url" ]; do _i=$((_i+1)); done; ID="$ID-$_i"
     fi
-    printf '%s\n%s\n' "$NAME" "$URL" > "$SUBS/$ID.url"
-    set -- $(pull "$ID" "$URL"); ADDED="$1"
-    if [ "${ADDED:-0}" -eq 0 ]; then
-      # nothing imported -> don't keep a dead sub on disk; report the truth
-      rm -f "$SUBS/$ID.url" "$SUBS/$ID.tags" "$SUBS/$ID.upd"
-      printf '{"ok":false,"id":"%s","added":0,"msg":"subscription returned no valid servers"}\n' "$(jstr "$ID")"
-    else
+    if COUNTS=$(pull "$ID" "$URL" "$NAME"); then
+      set -- $COUNTS; ADDED="$1"
       printf '{"ok":true,"id":"%s","name":"%s","added":%s}\n' "$(jstr "$ID")" "$(jstr "$NAME")" "$ADDED"
+    else
+      printf '{"ok":false,"id":"%s","added":0,"msg":"Subscription update failed; existing servers preserved"}\n' "$(jstr "$ID")"
     fi
     ;;
 
@@ -145,17 +200,23 @@ case "$CMD" in
 
   refresh)
     WHICH="${1:-all}"
-    TADD=0; TRM=0; K=0
+    TADD=0; TRM=0; K=0; FAILED=0
     for f in "$SUBS"/*.url; do
       [ -f "$f" ] || continue
       id=$(basename "$f" .url)
       [ "$WHICH" = "all" ] || [ "$WHICH" = "$id" ] || continue
       url=$(sed -n 2p "$f"); [ -z "$url" ] && continue
-      set -- $(pull "$id" "$url")
-      TADD=$((TADD + ${1:-0})); TRM=$((TRM + ${2:-0})); K=$((K+1))
+      K=$((K+1))
+      if COUNTS=$(pull "$id" "$url"); then
+        set -- $COUNTS
+        TADD=$((TADD + ${1:-0})); TRM=$((TRM + ${2:-0}))
+      else
+        FAILED=$((FAILED+1))
+      fi
     done
     [ "$K" -eq 0 ] && { echo '{"ok":false,"subs":0,"msg":"no subscriptions to refresh"}'; exit 0; }
-    printf '{"ok":true,"subs":%s,"added":%s,"removed":%s}\n' "$K" "$TADD" "$TRM"
+    OK=true; [ "$FAILED" -eq 0 ] || OK=false
+    printf '{"ok":%s,"subs":%s,"added":%s,"removed":%s,"failed":%s}\n' "$OK" "$K" "$TADD" "$TRM" "$FAILED"
     ;;
 
   *)

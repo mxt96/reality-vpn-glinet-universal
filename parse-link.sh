@@ -19,9 +19,9 @@ LINK="$1"; TAG="$2"
 die(){ echo "$1" >&2; exit 1; }
 jstr(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # URL-decode (%XX and +) — portable (busybox/dash/gawk), no strtonum
-urldec(){ printf '%s' "$1" | awk '
+urldec(){ printf '%s' "$1" | awk -v preserve_plus="${2:-0}" '
   BEGIN{ for(i=0;i<16;i++){ x=sprintf("%x",i); H[x]=i; H[toupper(x)]=i } }
-  { gsub(/\+/," "); r=""; n=length($0); i=1;
+  { if(!preserve_plus) gsub(/\+/," "); r=""; n=length($0); i=1;
     while(i<=n){ c=substr($0,i,1);
       if(c=="%" && i+2<=n){ a=substr($0,i+1,1); b=substr($0,i+2,1);
         if((a in H)&&(b in H)){ r=r sprintf("%c",H[a]*16+H[b]); i+=3; continue } }
@@ -54,8 +54,20 @@ if [ "$SCHEME" != "vmess" ]; then
   BODY=${BODY%%#*}
   QS=$(printf '%s' "$BODY" | sed -n 's/^[^?]*?\(.*\)$/\1/p')
   MAIN=${BODY%%\?*}
-  USERINFO=$(printf '%s' "$MAIN" | sed -n 's/^\([^@]*\)@.*/\1/p')
-  HOSTPORT=$(printf '%s' "$MAIN" | sed 's/^[^@]*@//')
+  SS_LEGACY=0
+  if [ "$SCHEME" = "ss" ]; then
+    case "$MAIN" in
+      *@*) : ;;
+      *) MAIN=$(b64dec "$MAIN") || die "ss: bad base64"; SS_LEGACY=1 ;;
+    esac
+  fi
+  case "$MAIN" in
+    *@*) USERINFO=${MAIN%@*}; HOSTPORT=${MAIN##*@} ;;
+    *) die "missing user information" ;;
+  esac
+  case "$SCHEME" in
+    trojan|hysteria2|hy2|vless) USERINFO=$(urldec "$USERINFO" 1) ;;
+  esac
   # drop any trailing "/path" (e.g. hysteria2://pass@host:8443/?sni=…) so the port
   # parse below doesn't capture the slash -> "server_port": 8443/ -> invalid JSON.
   HOSTPORT=${HOSTPORT%%/*}
@@ -165,15 +177,15 @@ case "$SCHEME" in
     emit "$J }"
     ;;
   ss)
-    if [ -n "$USERINFO" ] && [ -n "$HOST" ]; then
-      MP=$(b64dec "$USERINFO"); case "$MP" in *:*) : ;; *) MP="$USERINFO" ;; esac
-      METHOD=${MP%%:*}; PASS=${MP#*:}
+    if [ "$SS_LEGACY" = 1 ]; then
+      MP="$USERINFO"
     else
-      DEC=$(b64dec "$MAIN")
-      U2=$(printf '%s' "$DEC" | sed -n 's/^\([^@]*\)@.*/\1/p')
-      HP2=$(printf '%s' "$DEC" | sed 's/^[^@]*@//')
-      METHOD=${U2%%:*}; PASS=${U2#*:}; HOST=${HP2%%:*}; PORT=${HP2##*:}
+      case "$USERINFO" in
+        *:*) MP=$(urldec "$USERINFO" 1) ;;
+        *) MP=$(b64dec "$(urldec "$USERINFO" 1)") || die "ss: bad base64 credentials" ;;
+      esac
     fi
+    case "$MP" in *:*) METHOD=${MP%%:*}; PASS=${MP#*:} ;; *) die "ss: missing method/password" ;; esac
     { [ -z "$HOST" ] || [ -z "$PORT" ] || [ -z "$METHOD" ]; } && die "ss: could not parse method/host/port"
     emit "{ \"type\": \"shadowsocks\", \"tag\": \"$(jstr "$TAG")\", \"server\": \"$(jstr "$HOST")\", \"server_port\": $PORT, \"method\": \"$(jstr "$METHOD")\", \"password\": \"$(jstr "$PASS")\" }"
     ;;
@@ -189,7 +201,7 @@ case "$SCHEME" in
     emit "$J }"
     ;;
   tuic)
-    UUID=${USERINFO%%:*}; PASS=${USERINFO#*:}
+    UUID=$(urldec "${USERINFO%%:*}" 1); PASS=$(urldec "${USERINFO#*:}" 1)
     { [ -z "$HOST" ] || [ -z "$PORT" ] || [ -z "$UUID" ]; } && die "tuic: missing uuid/host/port"
     SNI=$(qp sni peer); [ -z "$SNI" ] && SNI="$HOST"; ALPN=$(qp alpn)
     INS=$(qp insecure allowInsecure); { [ "$INS" = "1" ] || [ "$INS" = "true" ]; } && INS=1 || INS=

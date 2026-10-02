@@ -55,8 +55,8 @@ else
   # one tag per line). "Auto ★" picks the best among ONLY the servers mason marked,
   # not all 90+ from a subscription. Built only when ≥1 favorite still exists.
   FAV_TAGS=""
-  if [ -f /etc/sing-box/favorites ]; then
-    while IFS= read -r ft; do [ -z "$ft" ] && continue; [ -f "/etc/sing-box/servers/$ft.json" ] && FAV_TAGS="$FAV_TAGS,\"$ft\""; done < /etc/sing-box/favorites
+  if [ -f "$SBDIR/favorites" ]; then
+    while IFS= read -r ft; do [ -z "$ft" ] && continue; [ -f "$SRVDIR/$ft.json" ] && FAV_TAGS="$FAV_TAGS,\"$ft\""; done < "$SBDIR/favorites"
   fi
   if [ -n "$FAV_TAGS" ]; then
     FILT_OUT="$FILT_OUT,
@@ -75,8 +75,8 @@ cat > "$CFG" <<JSON
   "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } },
   "dns": {
     "servers": [
-      { "tag": "remote", "type": "udp", "server": "8.8.8.8" },
-      { "tag": "direct-dns", "type": "udp", "server": "1.1.1.1" }
+      { "tag": "remote", "type": "udp", "server": "8.8.8.8", "detour": "$FINAL" },
+      { "tag": "direct-dns", "type": "udp", "server": "1.1.1.1", "detour": "direct" }
     ],
     "final": "remote",
     "strategy": "prefer_ipv4"
@@ -100,6 +100,15 @@ cat > "$CFG" <<JSON
   }
 }
 JSON
+if [ "${REBUILD_CHECK_ONLY:-0}" = 1 ] || [ "$(cat "$SBDIR/vpn.enabled" 2>/dev/null)" = 0 ]; then
+  if "$SB" check -c "$CFG"; then
+    echo OK
+    exit 0
+  fi
+  [ "${REBUILD_CHECK_ONLY:-0}" = 1 ] || cp -f "$CFG.bak" "$CFG" 2>/dev/null
+  echo CHECK_FAIL
+  exit 1
+fi
 # Ensure swap is on before any heavy sing-box exec (RAM-starved routers). install.sh
 # creates the swapfile on persistent storage; re-enable it here in case of a reboot
 # where rc.local hasn't run yet. SILENT no-op on roomy-RAM boxes / no swapfile (stdout

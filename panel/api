@@ -13,8 +13,8 @@ check_pw(){ S=$(grep '^root:' /etc/shadow | cut -d: -f2); A=$(printf '%s' "$S" |
 now_of(){ curl -s --max-time 3 "$API/proxies/$1" 2>/dev/null | sed -n 's/.*"now": *"\([A-Za-z0-9._-]*\)".*/\1/p'; }
 # killswitch backend (fw4/nftables vs fw3/iptables) + desired-state live in ks-lib.sh
 . /etc/sing-box/ks-lib.sh 2>/dev/null
-ks_on(){ ks_set_desired 1; ks_enforce; }
-ks_off(){ ks_set_desired 0; ks_enforce; }
+ks_on(){ ks_set_desired 1 && ks_enforce; }
+ks_off(){ ks_set_desired 0 && ks_enforce; }
 
 ACT=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*action=\([a-z_]*\).*/\1/p')
 IP=$(printf '%s' "${REMOTE_ADDR:-x}" | tr -c 'A-Za-z0-9.' '_'); BF="$BFDIR/$IP"
@@ -47,8 +47,8 @@ case "$ACT" in
     UM=$(awk "BEGIN{printf \"%.1f\", ${UB:-0}*8/1000000}")
     emit; echo "{\"down\":\"$DM\",\"up\":\"$UM\"}"; exit 0;;
   vpn_off) echo 0 > /etc/sing-box/vpn.enabled; /etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; ip rule del pref 500 >/dev/null 2>&1; ks_enforce 2>/dev/null; (sleep 3; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
-  ks_on) ks_on;;
-  ks_off) ks_off;;
+  ks_on) ks_on || { emit; echo '{"ok":false,"msg":"Could not enable leak protection"}'; exit 0; };;
+  ks_off) ks_off || { emit; echo '{"ok":false,"msg":"Could not disable leak protection"}'; exit 0; };;
   proto) P=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p')
       # Selectable outbounds: "auto" (all servers), the protocol-filtered "auto-reality"
       # / "auto-hy2" groups (rebuild.sh builds them only when servers of that family
@@ -62,7 +62,9 @@ case "$ACT" in
       esac
       curl -s --max-time 4 -X PUT "$API/proxies/select" -d "{\"name\":\"$P\"}" >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
   setpass) NP=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
-    if [ -n "$NP" ] && [ "${#NP}" -ge 6 ]; then printf 'root:%s\n' "$NP" | chpasswd >/dev/null 2>&1; emit; echo '{"ok":true,"msg":"Password changed"}'; else emit; echo '{"ok":false,"msg":"At least 6 characters"}'; fi
+    if [ -n "$NP" ] && [ "${#NP}" -ge 6 ]; then
+      if printf 'root:%s\n' "$NP" | chpasswd >/dev/null 2>&1; then emit; echo '{"ok":true,"msg":"Password changed"}'; else emit; echo '{"ok":false,"msg":"Password change failed"}'; fi
+    else emit; echo '{"ok":false,"msg":"At least 6 characters"}'; fi
     exit 0;;
   ip) /etc/sing-box/geo-refresh.sh 2>/dev/null
       G=$(cat /tmp/lk-geo 2>/dev/null)
@@ -71,7 +73,12 @@ case "$ACT" in
   addserver)
       NM=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]name=\([A-Za-z0-9._-]*\).*/\1/p')
       LINK=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
+      if ! mkdir /etc/sing-box/.servers.lock 2>/dev/null; then emit; echo '{"ok":false,"msg":"Server update already running"}'; exit 0; fi
+      trap 'rmdir /etc/sing-box/.servers.lock 2>/dev/null' EXIT
+      trap 'exit 1' HUP INT TERM
       TAG="srv-$(date +%s)"; [ -n "$NM" ] && TAG="srv-$(printf '%s' "$NM" | tr -c 'A-Za-z0-9._-' '_')"
+      BASE="$TAG"; I=1
+      while [ -e "/etc/sing-box/servers/$TAG.json" ]; do TAG="$BASE-$I"; I=$((I+1)); done
       OUT=$(/etc/sing-box/parse-link.sh "$LINK" "$TAG" 2>/tmp/parse-perr)
       if [ -z "$OUT" ]; then REASON=$(cat /tmp/parse-perr 2>/dev/null | sed 's/"/\\"/g'); emit; echo "{\"ok\":false,\"msg\":\"Bad link: ${REASON:-unrecognized}\"}"; exit 0; fi
       printf '%s' "$OUT" > "/etc/sing-box/servers/$TAG.json"
@@ -94,6 +101,9 @@ case "$ACT" in
       # have no srv- prefix (e.g. VPS-HY2) and were previously undeletable. The [ -f ]
       # guard + charset (no slash) keep this safe from traversal.
       DP=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p')
+      if ! mkdir /etc/sing-box/.servers.lock 2>/dev/null; then emit; echo '{"ok":false,"msg":"Server update already running"}'; exit 0; fi
+      trap 'rmdir /etc/sing-box/.servers.lock 2>/dev/null' EXIT
+      trap 'exit 1' HUP INT TERM
       [ -n "$DP" ] && [ -f "/etc/sing-box/servers/$DP.json" ] && { rm -f "/etc/sing-box/servers/$DP.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; }
       emit; echo '{"ok":true}'; exit 0;;
   checkupdate)

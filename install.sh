@@ -340,6 +340,11 @@ EOF
   ACTION=reload sh /etc/hotplug.d/firewall/99-reality-fwd
   say "fw4 forwarding hook installed (survives reboot + firewall reloads)."
 else
+  if [ -d /proc/sys/net/ipv6 ] && ! command -v ip6tables >/dev/null 2>&1; then
+    say "Installing ip6tables for IPv6 kill switch protection..."
+    opkg update && opkg install ip6tables || die "cannot install ip6tables; IPv6 kill switch protection is unavailable"
+    command -v ip6tables >/dev/null 2>&1 || die "ip6tables is still unavailable"
+  fi
   say "firewall: iptables/fw3 path active (postup.sh installs FORWARD+MASQUERADE rules)."
 fi
 
@@ -355,8 +360,7 @@ cat > /etc/hotplug.d/firewall/99-reality-ks <<'EOF'
 #!/bin/sh
 [ -r /etc/sing-box/ks-lib.sh ] || exit 0
 . /etc/sing-box/ks-lib.sh
-ks_enforce 2>/dev/null
-exit 0
+ks_enforce
 EOF
 chmod +x /etc/hotplug.d/firewall/99-reality-ks
 grep -qxF /etc/hotplug.d/firewall/99-reality-ks /etc/sysupgrade.conf 2>/dev/null || echo /etc/hotplug.d/firewall/99-reality-ks >> /etc/sysupgrade.conf 2>/dev/null || true

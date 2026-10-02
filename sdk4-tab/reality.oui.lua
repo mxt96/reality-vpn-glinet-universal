@@ -30,6 +30,15 @@ local function sh(cmd, timeout)
     return data or ""
 end
 
+local function lock_servers()
+    return trim(sh("mkdir /etc/sing-box/.servers.lock 2>/dev/null && echo OK")) == "OK"
+end
+
+local function unlock_servers(result)
+    sh("rmdir /etc/sing-box/.servers.lock 2>/dev/null")
+    return result
+end
+
 local function now_of(sel)
     -- Fetch raw JSON and parse in Lua. Do NOT pipe through sed: under oui-httpd's
     -- ngx.pipe.spawn a shell pipeline (`curl | sed`) returns EMPTY (only a single
@@ -75,6 +84,7 @@ end
 function M.get_status(args)
     local vpn = trim(sh("[ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = \"1\" ] && echo true || echo false"))
     local ks  = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_desired && echo true || echo false"))
+    local ks_active = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_present && echo true || echo false")) == "true"
     local sel = now_of("select")
     local active = sel
     if sel == "auto" or sel == "auto-reality" or sel == "auto-hy2" or sel == "auto-fav" then active = now_of(sel) end
@@ -84,8 +94,9 @@ function M.get_status(args)
     if active ~= "" and active ~= "direct" then
         srvjson = trim(sh("cat " .. SERVERS .. "/" .. active .. ".json 2>/dev/null"))
     end
+    local pending = trim(sh("[ -f /etc/sing-box/favorites.pending ] && echo y")) == "y"
     local ok, res = pcall(parse_status, vpn, ks, sel, active, geo, srvjson)
-    if ok and type(res) == "table" then return res end
+    if ok and type(res) == "table" then res.favorites_pending = pending; res.killswitch_active = ks_active; return res end
     return {
         running = (vpn == "true"), killswitch = (ks == "true"), mode = "", active = "",
         egress = "", country = "", city = "", ping = "",
@@ -110,26 +121,27 @@ end
 -- ---- protocol selector --------------------------------------------------
 function M.set_proto(args)
     local p = args and args.proto or ""
-    -- Only "auto" or a real server tag map to an existing outbound. Legacy/phantom
-    -- names (hy2-out, reality-out) have NO matching outbound in the universal config,
-    -- so selecting them blackholes traffic and, with killswitch on, kills internet.
-    -- Validate against the live servers dir; fall back to "auto" so we never select
-    -- a non-existent node.
-    if p == "auto-reality" or p == "auto-hy2" or p == "auto-fav" then
-        -- protocol-filtered auto groups: rebuild.sh builds them only when servers of
-        -- that family exist. Fall back to plain "auto" if the group isn't in the config.
-        if trim(sh("grep -q '\"tag\": \"" .. p .. "\"' /etc/sing-box/reality_full.json 2>/dev/null && echo y || echo n")) ~= "y" then
-            p = "auto"
+    if not p:match("^[%w][%w._%-]*$") then return { ok = false, msg = "Invalid server selection" } end
+    if p == "auto-fav" then
+        if trim(sh("for t in $(cat /etc/sing-box/favorites 2>/dev/null); do [ -f /etc/sing-box/servers/$t.json ] && { echo y; break; }; done")) ~= "y" then
+            return { ok = false, msg = "Choose at least one favorite server" }
         end
-    elseif p ~= "auto" then
-        if not p:match("^[%w][%w._%-]*$") then
-            p = "auto"
-        elseif trim(sh("[ -f /etc/sing-box/servers/" .. p .. ".json ] && echo y || echo n")) ~= "y" then
-            p = "auto"
+        if trim(sh("[ -f /etc/sing-box/favorites.pending ] && echo y")) == "y" then
+            local applied = M.apply_favorites()
+            if not applied.ok then return applied end
         end
     end
-    sh("curl -s --max-time 4 -X PUT " .. CLASH .. "/proxies/select -d '{\"name\":\"" .. p ..
-        "\"}' >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
+    if p == "auto" or p == "auto-reality" or p == "auto-hy2" or p == "auto-fav" then
+        if trim(sh("grep -q '\"tag\": \"" .. p .. "\"' /etc/sing-box/reality_full.json 2>/dev/null && echo y")) ~= "y" then
+            return { ok = false, msg = "This server pool is unavailable" }
+        end
+    elseif trim(sh("[ -f /etc/sing-box/servers/" .. p .. ".json ] && echo y")) ~= "y" then
+        return { ok = false, msg = "Server no longer exists" }
+    end
+    local result = trim(sh("curl -fsS --max-time 4 -X PUT " .. CLASH .. "/proxies/select -d '{\"name\":\"" .. p ..
+        "\"}' >/dev/null 2>&1 && echo OK"))
+    if result ~= "OK" then return { ok = false, msg = "Could not switch server" } end
+    sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
     return { ok = true, mode = p }
 end
 
@@ -157,13 +169,10 @@ end
 -- ---- killswitch ---------------------------------------------------------
 function M.set_killswitch(args)
     local on = args and args.on
-    -- backend-aware (fw4/nftables vs fw3/iptables) + desired-state via ks-lib.sh;
-    -- ks_set_desired also mirrors into GL's native killswitch uci for UI sync.
-    if on == true or on == "true" or on == 1 then
-        sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_set_desired 1; ks_enforce")
-    else
-        sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_set_desired 0; ks_enforce")
-    end
+    local enabled = on == true or on == "true" or on == 1
+    local result = trim(sh(". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_set_desired " ..
+        (enabled and "1" or "0") .. " && ks_enforce && echo OK"))
+    if result ~= "OK" then return { ok = false, msg = "Could not update leak protection; check firewall support" } end
     return { ok = true }
 end
 
@@ -188,6 +197,7 @@ function M.set_fav(args)
     local tag = args and args.tag or ""
     local on = args and (args.on == true or args.on == "true" or args.on == 1 or args.on == "1")
     if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end
+    if not lock_servers() then return { ok = false, msg = "Server update already running" } end
     if on then
         sh("touch /etc/sing-box/favorites; grep -qxF '" .. tag .. "' /etc/sing-box/favorites || echo '" .. tag .. "' >> /etc/sing-box/favorites")
     else
@@ -195,14 +205,11 @@ function M.set_fav(args)
         -- (removing the last favorite), which would skip mv and leave the favorite stuck.
         sh("[ -f /etc/sing-box/favorites ] && { grep -vxF '" .. tag .. "' /etc/sing-box/favorites > /etc/sing-box/favorites.tmp 2>/dev/null; mv /etc/sing-box/favorites.tmp /etc/sing-box/favorites; }")
     end
-    -- rebuild so the auto-fav urltest pool reflects the change; reload sing-box if running
-    sh("sh /etc/sing-box/rebuild.sh >/dev/null 2>&1; [ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = 1 ] && /etc/init.d/sing-box restart >/dev/null 2>&1", 20)
-    return { ok = true }
+    sh("touch /etc/sing-box/favorites.pending")
+    return unlock_servers({ ok = true })
 end
 
--- Bulk star/unstar — set the whole "Auto ★" pool from the UI's filtered set in ONE
--- shot (e.g. "★ all shown" after a search/protocol filter). Writes favorites once and
--- rebuilds once, instead of N rebuilds — essential with 100+ subscription servers.
+-- Save the pool without interrupting the current connection; apply is explicit.
 function M.set_fav_bulk(args)
     local tags = args and args.tags or {}
     local on = args and (args.on == true or args.on == "true" or args.on == 1 or args.on == "1")
@@ -212,6 +219,7 @@ function M.set_fav_bulk(args)
         if type(tg) == "string" and tg:match("^[%w][%w._%-]*$") then clean[#clean + 1] = tg end
     end
     if #clean == 0 then return { ok = false, msg = "no valid tags" } end
+    if not lock_servers() then return { ok = false, msg = "Server update already running" } end
     -- tags are filename-safe (alnum . _ -) so they're safe to pass unquoted into sh.
     local list = table.concat(clean, " ")
     sh("F=/etc/sing-box/favorites; touch \"$F\"; T=/tmp/fav-batch.$$; : > \"$T\"; for x in " .. list ..
@@ -219,8 +227,16 @@ function M.set_fav_bulk(args)
        (on and "sort -u \"$F\" \"$T\" -o \"$F\""
             or "grep -vxF -f \"$T\" \"$F\" > \"$F.tmp\" 2>/dev/null; mv \"$F.tmp\" \"$F\""
        ) .. "; rm -f \"$T\"")
-    sh("sh /etc/sing-box/rebuild.sh >/dev/null 2>&1; [ \"$(cat /etc/sing-box/vpn.enabled 2>/dev/null)\" = 1 ] && /etc/init.d/sing-box restart >/dev/null 2>&1", 25)
-    return { ok = true, n = #clean }
+    sh("touch /etc/sing-box/favorites.pending")
+    return unlock_servers({ ok = true, n = #clean })
+end
+
+function M.apply_favorites(args)
+    if not lock_servers() then return { ok = false, msg = "Server update already running" } end
+    local r = trim(sh("sh /etc/sing-box/rebuild.sh 2>/dev/null | head -1", 30))
+    if r ~= "OK" then return unlock_servers({ ok = false, msg = "Could not apply favorite servers" }) end
+    sh("rm -f /etc/sing-box/favorites.pending")
+    return unlock_servers({ ok = true })
 end
 
 -- Per-server latency (Happ-style ping). Asks sing-box's Clash API to measure each
@@ -242,30 +258,37 @@ function M.add_server(args)
     local link = args and args.link or ""
     local name = args and args.name or ""
     if link == "" then return { ok = false, msg = "Empty link" } end
+    if not lock_servers() then return { ok = false, msg = "Server update already running" } end
     local tag
     if name ~= "" then tag = "srv-" .. name:gsub("[^%w._%-]", "_") else tag = "srv-" .. tostring(ngx.time()) end
 
+    local base, n = tag, 1
+    while trim(sh("[ -e " .. SERVERS .. "/" .. tag .. ".json ] && echo y")) == "y" do
+        tag = base .. "-" .. tostring(n)
+        n = n + 1
+    end
+
     -- write the share-link to a temp file (avoids shell-quoting / injection on the URL)
     local tf = io.open("/tmp/reality-addlink", "w")
-    if not tf then return { ok = false, msg = "io error" } end
+    if not tf then return unlock_servers({ ok = false, msg = "io error" }) end
     tf:write(link); tf:close()
 
     local parsed = trim(sh('/etc/sing-box/parse-link.sh "$(cat /tmp/reality-addlink)" ' .. tag .. ' 2>/tmp/reality-perr'))
     if parsed == "" then
         local reason = trim(sh("cat /tmp/reality-perr 2>/dev/null"))
-        return { ok = false, msg = reason ~= "" and ("Bad link: " .. reason) or "Unrecognized link" }
+        return unlock_servers({ ok = false, msg = reason ~= "" and ("Bad link: " .. reason) or "Unrecognized link" })
     end
     local sf = io.open(SERVERS .. "/" .. tag .. ".json", "w")
-    if not sf then return { ok = false, msg = "io error" } end
+    if not sf then return unlock_servers({ ok = false, msg = "io error" }) end
     sf:write(parsed); sf:close()
 
     local r = trim(sh("/etc/sing-box/rebuild.sh 2>/dev/null | head -1"))
     if r == "OK" then
-        return { ok = true, tag = tag }
+        return unlock_servers({ ok = true, tag = tag })
     else
         os.remove(SERVERS .. "/" .. tag .. ".json")
         sh("/etc/sing-box/rebuild.sh >/dev/null 2>&1")
-        return { ok = false, msg = "Server config rejected" }
+        return unlock_servers({ ok = false, msg = "Server config rejected" })
     end
 end
 
@@ -275,10 +298,12 @@ end
 function M.import_links(args)
     local text = args and args.text or ""
     if text == "" then return { ok = false, msg = "Empty input" } end
-    local tf = io.open("/tmp/reality-import", "w")
+    local path = trim(sh("mktemp /tmp/reality-import.XXXXXX"))
+    local tf = io.open(path, "w")
     if not tf then return { ok = false, msg = "io error" } end
     tf:write(text); tf:close()
-    local out = trim(sh("/etc/sing-box/import-links.sh < /tmp/reality-import 2>/dev/null", 60))
+    local out = trim(sh("/etc/sing-box/import-links.sh < " .. path .. " 2>/dev/null", 60))
+    os.remove(path)
     sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
     local ok, res = pcall(cjson.decode, out)
     if ok and type(res) == "table" then return res end
@@ -302,13 +327,13 @@ function M.add_sub(args)
     local name = args and args.name or ""
     if url == "" then return { ok = false, msg = "Empty URL" } end
     -- write url/name to temp files (avoids shell-quoting / injection on the URL)
-    local uf = io.open("/tmp/reality-suburl", "w")
+    local path = trim(sh("mktemp /tmp/reality-sub.XXXXXX"))
+    local uf = io.open(path, "w")
     if not uf then return { ok = false, msg = "io error" } end
-    uf:write(url); uf:close()
-    local nf = io.open("/tmp/reality-subname", "w")
-    if nf then nf:write(name); nf:close() end
+    uf:write(url .. "\n" .. name); uf:close()
     local out = trim(sh("sh " .. SUBSTORE ..
-        " add \"$(cat /tmp/reality-suburl)\" \"$(cat /tmp/reality-subname 2>/dev/null)\" 2>/dev/null", 60))
+        " add \"$(sed -n 1p " .. path .. ")\" \"$(sed -n 2p " .. path .. ")\" 2>/dev/null", 60))
+    os.remove(path)
     sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
     local ok, res = pcall(cjson.decode, out)
     if ok and type(res) == "table" then return res end
@@ -338,6 +363,7 @@ end
 function M.del_server(args)
     local tag = args and args.tag or ""
     if not tag:match("^[%w][%w._%-]*$") then return { ok = false, msg = "bad tag" } end
+    if not lock_servers() then return { ok = false, msg = "Server update already running" } end
     -- If deleting the currently-selected server, fall back to "auto" first so the
     -- tunnel keeps running on the base outbounds instead of breaking. (mason: safe
     -- delete of the active config.)
@@ -348,7 +374,7 @@ function M.del_server(args)
     end
     os.remove(SERVERS .. "/" .. tag .. ".json")
     sh("/etc/sing-box/rebuild.sh >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
-    return { ok = true, was_active = was_active }
+    return unlock_servers({ ok = true, was_active = was_active })
 end
 
 -- Edit a server: replace its share-link (and optionally rename). The original
