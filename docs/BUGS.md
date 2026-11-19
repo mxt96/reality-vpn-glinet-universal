@@ -17,6 +17,7 @@
 | Installer overwrote the native GL kill-switch setting | Stop mirroring independent package flags into native GL routing policy |
 | Changing procd START order left duplicate old boot symlinks | Disable and re-enable owned services when upgrading their init scripts |
 | Private installer umask left CGI without world-execute permission, causing uhttpd HTTP 403 | Set explicit public directory/CGI modes; actual login and authenticated status checks passed |
+| Switching tabs could reload a form after typing began | Make tab navigation local and test delayed responses with an explicit save-response wait |
 | UI confused desired ON with verified connectivity | Separate desired state, observed daemon and recent HTTPS health result |
 
 An IPv6 leak in the original sing-box `strict_route` configuration was **not

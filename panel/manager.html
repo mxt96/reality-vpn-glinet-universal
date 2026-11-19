@@ -758,10 +758,12 @@
         ["routing", L("Routing", "Маршрутизация")],
         ["service", L("Service", "Обслуживание")],
       ].forEach(([id, title]) => {
-        const b = button(title, async () => {
+        const b = node("button", title, { type: "button", disabled: busy });
+        b.onclick = () => {
+          if (busy) return;
           tab = id;
           render();
-        });
+        };
         b.className = tab === id ? "active" : "";
         $("#nav").append(b);
       });
