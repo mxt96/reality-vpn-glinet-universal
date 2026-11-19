@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: alpine:3.22
     steps:
       - name: Install test tools
@@ -23,7 +23,7 @@ jobs:
           python3 tests/routing_test.py
           python3 tests/manager_regressions.py
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -71,6 +71,9 @@ The following were exercised with real packets:
   router-originated management traffic remained possible.
 - Deleting the assigned WireGuard interface blocked client A's WAN/VPN requests
   without falling back to another route. Router access remained available.
+- After reboot, the daemon and forwarding guard started automatically; Hysteria2
+  selection and local-only policy persisted. Client A retained local ping but could
+  not fetch the WAN fixture, while B fetched through VPN.
 - Real subscription add → refresh → delete completed and retained manual servers.
 
 The fw3 lifecycle script made 19 successful assertions; the nft/native-tunnel
