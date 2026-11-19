@@ -16,6 +16,7 @@
 | Direct IPv6 did not discover the WAN's separate DHCPv6 network | Use routes from the same WAN L3 device; successful IPv6 baseline before local-only block |
 | Installer overwrote the native GL kill-switch setting | Stop mirroring independent package flags into native GL routing policy |
 | Changing procd START order left duplicate old boot symlinks | Disable and re-enable owned services when upgrading their init scripts |
+| Private installer umask left CGI without world-execute permission, causing uhttpd HTTP 403 | Set explicit public directory/CGI modes; actual login and authenticated status checks passed |
 | UI confused desired ON with verified connectivity | Separate desired state, observed daemon and recent HTTPS health result |
 
 An IPv6 leak in the original sing-box `strict_route` configuration was **not

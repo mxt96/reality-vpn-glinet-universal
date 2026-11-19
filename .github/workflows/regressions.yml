@@ -30,5 +30,12 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-save playwright@1.56.1 vue@2.7.16
-      - run: npx playwright install --with-deps chromium
+      - name: Select installed Chrome or install Chromium
+        run: |
+          browser_path=$(command -v google-chrome || command -v google-chrome-stable || true)
+          if [ -n "$browser_path" ]; then
+            echo "CHROMIUM_PATH=$browser_path" >> "$GITHUB_ENV"
+          else
+            npx playwright install --with-deps chromium
+          fi
       - run: node tests/ui-panel.cjs && node tests/ui-manager.cjs

@@ -74,6 +74,8 @@ The following were exercised with real packets:
 - After reboot, the daemon and forwarding guard started automatically; Hysteria2
   selection and local-only policy persisted. Client A retained local ping but could
   not fetch the WAN fixture, while B fetched through VPN.
+- Standalone CGI rejected unauthenticated access, accepted the router-password
+  login, returned authenticated manager status and rejected GET mutations.
 - Real subscription add → refresh → delete completed and retained manual servers.
 
 The fw3 lifecycle script made 19 successful assertions; the nft/native-tunnel

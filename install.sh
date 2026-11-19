@@ -404,10 +404,11 @@ if [ -f "$D/panel/index.html" ] && [ -f "$D/panel/api" ] && [ -f "$D/panel/vpn-p
     say "openssl missing -> installing via opkg..."; opkg update >/dev/null 2>&1; opkg install openssl-util >/dev/null 2>&1
   fi
   mkdir -p /www-vpn/cgi-bin
+  chmod 755 /www-vpn /www-vpn/cgi-bin
   cp "$D/panel/index.html" /www-vpn/index.html
   cp "$D/panel/manager.html" /www-vpn/manager.html
   chmod 644 /www-vpn/index.html /www-vpn/manager.html
-  cp "$D/panel/api" /www-vpn/cgi-bin/api && chmod +x /www-vpn/cgi-bin/api
+  cp "$D/panel/api" /www-vpn/cgi-bin/api && chmod 755 /www-vpn/cgi-bin/api
   cp "$D/panel/vpn-panel.init" /etc/init.d/vpn-panel && chmod +x /etc/init.d/vpn-panel
   /etc/init.d/vpn-panel enable 2>/dev/null || true
   # `start` (not `restart`): uhttpd re-reads the CGI + index.html per request, so a
