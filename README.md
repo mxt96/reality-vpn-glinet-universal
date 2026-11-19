@@ -1,6 +1,6 @@
 # reality-vpn-glinet-universal
 
-Self-hosted **Reality / Hysteria2 VPN** for **GL.iNet** routers, powered by
+Self-hosted **VPN connection manager** for **GL.iNet** routers, powered by
 [sing-box](https://github.com/SagerNet/sing-box). **Creds-free and arch-universal:**
 the repo contains **no binary and no credentials** — the installer downloads the
 correct sing-box for your router's CPU at install time, and **you bring your own
@@ -8,6 +8,17 @@ server** by pasting a share-link.
 
 With **zero servers configured the config is valid and routes DIRECT**, so the
 router keeps normal internet until you add a server.
+
+## 2.0 beta upgrade
+
+The shared manager adds device/network access rules, explicit WireGuard/OpenVPN
+interface selection, domain profiles, DNS settings, persistent server selection,
+HTTPS health checks, diagnostics and backup export. It includes the LAN-only
+scenario where an Ethernet device can reach its Wi-Fi neighbor without internet.
+
+Read [the upgrade guide](docs/UPGRADE.md) before deploying this beta. It documents
+policy precedence, IPv6 behavior, DNS limits and remaining GL.iNet hardware tests.
+See [the verification report](docs/TESTING.md) and [fixed bugs](docs/BUGS.md).
 
 ## You'll need a server
 
@@ -36,8 +47,8 @@ from GitHub and `scp` it over instead.
 
 `install.sh` will:
 1. detect the CPU arch (`uname -m` + `opkg print-architecture`),
-2. fetch the **latest stable** sing-box release tag from GitHub,
-3. download + extract the matching asset, `file`-verify arch/endianness,
+2. read the **pinned sing-box version** from `SING_BOX_VERSION`,
+3. download the matching asset, verify SHA-256, extract and check arch/endianness,
 4. install it (to `/usr/bin`, or microSD `/mnt/mmcblk0p1/sing-box/` with a PATH
    symlink if rootfs is tight), install scripts, an init.d service and cron jobs,
 5. generate a valid DIRECT-only config (VPN off until you add a server).
@@ -60,7 +71,7 @@ The panel also gives you VPN on/off, a kill-switch toggle, proxy/server select,
 IP/geo + ping, a speedtest, server list/delete, and a change-password action.
 Requires `uhttpd` and `openssl` on the router (install warns, doesn't fail, if
 they're missing: `opkg update && opkg install uhttpd openssl-util`). The panel
-binds `0.0.0.0:8088` and survives firmware upgrades via `/etc/sysupgrade.conf`.
+binds the LAN IPv4 address and loopback on port `8088` and survives firmware upgrades via `/etc/sysupgrade.conf`.
 
 ## Add your server (by share-link)
 
@@ -119,7 +130,7 @@ Unsupported arch → the installer aborts with a clear error.
 ## Firmware note
 
 - **GL.iNet fw 4.x (SDK4):** the installer auto-detects the SDK4 UI stack and
-  installs a **native "Reality" tab in the router's VPN menu** — *in addition to*
+  installs a **native "Sing-box VPN" tab in the router's VPN menu** — *in addition to*
   the `:8088` web panel. You get on/off, kill-switch, proxy/server select, geo +
   ping, speedtest and server add/edit/delete right inside the stock GL UI. The
   tab is creds-free (status is derived dynamically from the active server file;
@@ -131,11 +142,10 @@ Unsupported arch → the installer aborts with a clear error.
   browser UI (add/manage servers, on/off, kill-switch). SSH (`add-server.sh` /
   `list-servers.sh` / `del-server.sh`) and the sing-box **clash-api**
   (`127.0.0.1:9090`) remain available as fallbacks.
-- **Firewall:** both backends are handled. On **fw3 (iptables)** `postup.sh`
-  installs FORWARD + MASQUERADE (re-applied from cron). On **fw4 (nftables)** the
-  installer drops a hotplug-firewall hook that re-adds the LAN→tunnel forwarding
-  into the `inet fw4` table on every reload (idempotent, survives reboots). In
-  both cases sing-box `auto_route` already tunnels the router's own traffic.
+- **Firewall:** the shared Lua manager configures fw3 (iptables) or fw4
+  (nftables), and startup/firewall/interface hooks reconcile policies. The TUN
+  routes LAN traffic explicitly; router-originated traffic retains normal routing.
+  Read the [upgrade guide](docs/UPGRADE.md) for policy and DNS limitations.
 - Install survives firmware upgrades via `/etc/sysupgrade.conf`.
 
 ## Security note

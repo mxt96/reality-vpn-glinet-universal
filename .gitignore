@@ -5,3 +5,7 @@ servers/*.json
 !servers/server.example.json
 reality_full.json
 *.bak
+
+__pycache__/
+*.pyc
+node_modules/

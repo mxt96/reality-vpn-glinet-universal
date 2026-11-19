@@ -49,10 +49,25 @@ class BackendTests(unittest.TestCase):
         self.assertTrue((self.sb / 'subs/home.url').exists())
         self.assertTrue((self.sb / 'servers/srv-home.json').exists())
 
+    def test_delete_failure_restores_servers_and_metadata(self):
+        self.script(self.sb / 'rebuild.sh', 'echo CHECK_FAIL')
+        self.assertFalse(self.sub('del', 'home')['ok'])
+        self.assertIn('old', (self.sb / 'servers/srv-home.json').read_text())
+        self.assertTrue((self.sb / 'subs/home.url').exists())
+
+    def test_delete_removes_only_owned_servers_and_metadata(self):
+        (self.sb / 'servers/manual.json').write_text('manual')
+        (self.sb / 'subs/home.meta').write_text('title=home')
+        self.assertTrue(self.sub('del', 'home')['ok'])
+        self.assertFalse((self.sb / 'servers/srv-home.json').exists())
+        self.assertFalse((self.sb / 'subs/home.meta').exists())
+        self.assertEqual('manual', (self.sb / 'servers/manual.json').read_text())
+
     def use_real_import(self):
         (self.sb / 'import-links.sh').write_text((ROOT / 'import-links.sh').read_text())
         for name in ('parse-link.sh',):
-            self.script(self.sb / name, (ROOT / name).read_text())
+            (self.sb / name).write_text((ROOT / name).read_text())
+            (self.sb / name).chmod(0o755)
         # Stage resolves the parser next to the installed import script.
         self.script(self.bin / 'curl', "echo 'trojan://secret@example.test:443#home'")
 
@@ -97,6 +112,17 @@ class BackendTests(unittest.TestCase):
         result = subprocess.run(['sh', str(ROOT / 'import-links.sh')], input='trojan://secret@example.test:443#home', env=self.env, text=True, capture_output=True, check=True)
         self.assertFalse(json.loads(result.stdout)['ok'])
         self.assertIn('old', (self.sb / 'servers/srv-home.json').read_text())
+
+    def test_real_rebuild_helpers_are_available_in_subscription_stage(self):
+        self.use_real_import()
+        for name in ('rebuild.sh', 'runtime-lib.sh', 'manager.lua'):
+            (self.sb / name).write_text((ROOT / name).read_text())
+            (self.sb / name).chmod(0o755)
+        self.script(self.sb / 'sing-box', 'exit 0')
+        (self.sb / 'vpn.enabled').write_text('0')
+        self.assertTrue(self.sub('add', 'https://example.test/sub', 'new')['ok'])
+        cfg=json.loads((self.sb / 'reality_full.json').read_text())
+        self.assertFalse(cfg['inbounds'][0]['auto_route'])
 
     def run_lua(self, code):
         module = self.base / 'module.lua'

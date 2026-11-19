@@ -102,6 +102,10 @@ ks_present_family(){
 
 # A jump alone is insufficient: the target must block, in both IP families.
 ks_present(){
+  if [ -f "$SBDIR/manager.lua" ]; then
+    lua "$SBDIR/manager.lua" guard-status </dev/null 2>/dev/null | grep -q '"ok":true'
+    return $?
+  fi
   if ks_is_nft; then nft list table inet "$KS_TABLE" >/dev/null 2>&1; return $?; fi
   ks_present_family iptables || return 1
   if [ -d /proc/sys/net/ipv6 ]; then ks_present_family ip6tables || return 1; fi
@@ -111,9 +115,8 @@ ks_present(){
 # GL's native killswitch uci when that rule exists so the built-in UI stays in sync.
 ks_desired(){ [ "$(cat "$KS_FLAG" 2>/dev/null)" = "1" ]; }
 ks_set_desired(){
-  echo "$1" > "$KS_FLAG" || return 1
-  uci -q get route_policy.@rule[0].killswitch >/dev/null 2>&1 && \
-    { uci -q set route_policy.@rule[0].killswitch="$1"; uci -q commit route_policy; }
+  ks_flag_tmp=$(mktemp "$SBDIR/.ks.XXXXXX") || return 1
+  printf '%s\n' "$1" > "$ks_flag_tmp" && mv "$ks_flag_tmp" "$KS_FLAG" || return 1
   true
 }
 
@@ -124,5 +127,9 @@ vpn_desired(){ [ "$(cat "$SBDIR/vpn.enabled" 2>/dev/null)" = "1" ]; }
 # Reconcile live rules with desired state. INDEPENDENT of the VPN's on/off (mason):
 # armed -> block holds regardless of whether our tunnel is up; disarmed -> remove.
 ks_enforce(){
-  if ks_desired; then ks_apply; else ks_remove; fi
+  if [ -f "$SBDIR/manager.lua" ]; then
+    lua "$SBDIR/manager.lua" apply </dev/null >/dev/null 2>&1 || return 1
+    # Retire the old wildcard tunnel guard only after strict policies exist.
+    ks_remove
+  elif ks_desired; then ks_apply; else ks_remove; fi
 }

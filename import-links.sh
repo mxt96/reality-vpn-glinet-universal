@@ -1,4 +1,5 @@
 #!/bin/sh
+umask 077
 # import-links.sh — bulk-import many servers at once (Shadowrocket-style).
 #
 # Reads the payload from stdin. The payload may be ANY of:

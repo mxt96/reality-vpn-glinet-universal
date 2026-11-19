@@ -1,0 +1,5 @@
+8f7c5f0651238850d96a0e488e5473cd77ec1a0098f63942e943f475a12057ca  sing-box-1.14.4-linux-amd64-musl.tar.gz
+b95e25f921dc5e17a4cf13327243d1177642c7e35425bf5372862c477c359f56  sing-box-1.14.4-linux-arm64-musl.tar.gz
+fd164ed45ebc784f657a3e1d0e0ad0f68afdcff864ee57122c2cfed3ddb80a00  sing-box-1.14.4-linux-armv7.tar.gz
+a4fb20de7c8cfedd6053ff9ee73a5635a990267529c5f2349ae4ad02f0792a8a  sing-box-1.14.4-linux-mips-softfloat.tar.gz
+4abf94c284462bca0d9d23966b26e5675a2c0137b7945534f0fa1b0fc309b298  sing-box-1.14.4-linux-mipsle-softfloat.tar.gz

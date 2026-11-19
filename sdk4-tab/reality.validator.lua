@@ -1,6 +1,7 @@
 -- Arg validator for the `reality` rpc object.
 -- `true` per method => skip the default char-class validation (share-links contain ?&=@# etc.).
 return {
+    manager = true,
     get_status = true,
     get_traffic = true,
     set_proto = true,

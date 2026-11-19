@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>VPN connections</title>
+  <style>
+    :root {
+      font:
+        15px/1.5 system-ui,
+        sans-serif;
+      color: #202b3b;
+      background: #f2f5f8;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+    }
+    main {
+      max-width: 960px;
+      margin: auto;
+      padding: 24px 16px;
+    }
+    header,
+    .row,
+    nav {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    header {
+      justify-content: space-between;
+    }
+    h1 {
+      font-size: 26px;
+      margin: 0;
+    }
+    h2 {
+      font-size: 19px;
+      margin: 0 0 12px;
+    }
+    p {
+      margin: 8px 0;
+      color: #526276;
+    }
+    nav {
+      margin: 24px 0 16px;
+    }
+    button,
+    select,
+    input,
+    textarea {
+      font: inherit;
+      border: 1px solid #ccd6e2;
+      border-radius: 8px;
+      padding: 9px 12px;
+      max-width: 100%;
+    }
+    input,
+    textarea {
+      width: 100%;
+      background: white;
+    }
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+    button {
+      cursor: pointer;
+      background: white;
+      color: #185bd6;
+    }
+    button.primary,
+    nav button.active {
+      background: #185bd6;
+      color: white;
+      border-color: #185bd6;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: wait;
+    }
+    section,
+    .device {
+      background: white;
+      border: 1px solid #e0e6ed;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin: 12px 0 6px;
+    }
+    .device {
+      padding: 14px;
+      margin: 10px 0;
+    }
+    .device .row {
+      justify-content: space-between;
+    }
+    small {
+      color: #526276;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: 12px/1.5 monospace;
+    }
+    #notice {
+      position: sticky;
+      top: 8px;
+      padding: 12px;
+      background: #fff7da;
+      border-radius: 8px;
+      z-index: 1;
+      overflow-wrap: anywhere;
+    }
+    #notice:empty {
+      display: none;
+    }
+    .status {
+      font-size: 22px;
+      font-weight: 650;
+    }
+    .good {
+      color: #087d52;
+    }
+    .bad {
+      color: #bb2435;
+    }
+    [hidden] {
+      display: none !important;
+    }
+    a {
+      color: #185bd6;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    details {
+      margin: 16px 0;
+    }
+    summary {
+      cursor: pointer;
+    }
+    @media (max-width: 600px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      main {
+        padding: 16px 10px;
+      }
+      section {
+        padding: 16px;
+      }
+      .row select {
+        width: 100%;
+      }
+    }
+  </style>
+  <main>
+    <header>
+      <div>
+        <h1 id="title">VPN connections</h1>
+        <small>sing-box · WireGuard · OpenVPN</small>
+      </div>
+      <div class="row">
+        <button id="language">Русский</button
+        ><button id="logout">Log out</button>
+      </div>
+    </header>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <section id="login" hidden>
+      <h2>Router admin password</h2>
+      <form id="loginform">
+        <input
+          id="password"
+          type="password"
+          autocomplete="current-password"
+          required
+          aria-label="Router admin password"
+        />
+        <p><button class="primary">Log in</button></p>
+      </form>
+    </section>
+    <nav id="nav"></nav>
+    <div id="content"></div>
+  </main>
+  <script>
+    "use strict";
+    const $ = (s) => document.querySelector(s),
+      native = new URLSearchParams(location.search).get("native") === "1";
+    let ru = (localStorage.vpnLanguage || navigator.language).startsWith("ru"),
+      tab = "connection",
+      status = {},
+      devices = {},
+      servers = [],
+      subscriptions = [],
+      busy = false,
+      poll;
+    const L = (en, r) => (ru ? r : en),
+      array = (x) => (Array.isArray(x) ? x : []);
+    function node(tag, text, props = {}) {
+      const e = document.createElement(tag);
+      if (text !== null && text !== undefined) e.textContent = text;
+      Object.assign(e, props);
+      return e;
+    }
+    function button(text, fn, primary = false) {
+      const e = node("button", text, {
+        type: "button",
+        className: primary ? "primary" : "",
+      });
+      e.onclick = () => perform(fn);
+      return e;
+    }
+    function row(...children) {
+      const e = node("div", null, { className: "row" });
+      e.append(...children);
+      return e;
+    }
+    function field(parent, text, e) {
+      const id = "field-" + Math.random().toString(36).slice(2);
+      e.id = id;
+      const label = node("label", text, { htmlFor: id });
+      parent.append(label, e);
+      return e;
+    }
+    function select(options, value) {
+      const e = node("select");
+      options.forEach(([v, t]) => e.append(node("option", t, { value: v })));
+      e.value = value;
+      return e;
+    }
+    function section(title) {
+      const e = node("section");
+      e.append(node("h2", title));
+      return e;
+    }
+    function say(message, error = false) {
+      $("#notice").textContent = message || "";
+      $("#notice").className = error ? "bad" : "";
+    }
+    async function api(op, data) {
+      let r, j;
+      if (native) {
+        const m = document.cookie.match(/(?:^|;\s*)Admin-Token\s*=\s*([^;]+)/);
+        r = await fetch("/rpc", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "call",
+            params: [
+              m ? decodeURIComponent(m[1]) : "",
+              "reality",
+              "manager",
+              { op, data: data || {} },
+            ],
+          }),
+        });
+        j = await r.json();
+        if (j.error) throw Error(j.error.message || "RPC failed");
+        j = j.result;
+      } else {
+        r = await fetch(
+          "/cgi-bin/api?action=manager&op=" + encodeURIComponent(op),
+          {
+            method: data === undefined ? "GET" : "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: data === undefined ? undefined : JSON.stringify(data),
+          },
+        );
+        j = await r.json();
+        if (j.auth === false) {
+          $("#login").hidden = false;
+          $("#nav").hidden = true;
+          $("#content").hidden = true;
+          throw Error(L("Please log in", "Войдите с паролем роутера"));
+        }
+      }
+      if (!r.ok || !j || j.ok === false)
+        throw Error((j && j.msg) || "Request failed");
+      return j;
+    }
+    async function perform(fn) {
+      if (busy) return;
+      busy = true;
+      document.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      try {
+        await fn();
+        say(L("Saved", "Сохранено"));
+        await load();
+      } catch (e) {
+        say(e.message, true);
+      } finally {
+        busy = false;
+        document
+          .querySelectorAll("button")
+          .forEach((b) => (b.disabled = false));
+      }
+    }
+    function modes() {
+      return [
+        ["inherit", L("Use default", "По умолчанию")],
+        ["local-only", L("Local network only", "Только локальная сеть")],
+        [
+          "direct",
+          L("Direct through selected WAN", "Напрямую через выбранный WAN"),
+        ],
+        ["sing-box", "Sing-box VPN"],
+        ["interface", "WireGuard / OpenVPN"],
+      ];
+    }
+    async function policyEditor(container, device = {}) {
+      const old = device.policy || {},
+        box = node("div", null, { className: "device" }),
+        name = device.name || old.name || device.mac || "";
+      box.append(
+        node("strong", name),
+        node("p", [device.ip, device.mac].filter(Boolean).join(" · ")),
+      );
+      const mode = field(
+        box,
+        L("Internet access", "Доступ в интернет"),
+        select(modes(), old.mode || "inherit"),
+      );
+      const mac = field(
+        box,
+        L("Device MAC", "MAC устройства"),
+        node("input", null, {
+          value: device.mac || old.mac || "",
+          placeholder: "AA:BB:CC:DD:EE:FF",
+        }),
+      );
+      const kind = field(
+        box,
+        L("Apply to", "Применить к"),
+        select(
+          [
+            ["device", L("This device", "Этому устройству")],
+            [
+              "network",
+              L(
+                "Whole existing network / VLAN",
+                "Существующей сети / VLAN целиком",
+              ),
+            ],
+          ],
+          old.kind || "device",
+        ),
+      );
+      const source = field(
+        box,
+        L("Local interface", "Локальный интерфейс"),
+        select(
+          array(status.settings.lan_interfaces).map((x) => [x, x]),
+          old.source_interface || "br-lan",
+        ),
+      );
+      const names = array(devices.interfaces)
+        .map((x) => x.l3_device)
+        .filter((x) => /^(wg|awg|tun|tap|ovpn)/.test(x || ""));
+      if (old.interface && !names.includes(old.interface))
+        names.push(old.interface);
+      const tunnel = field(
+        box,
+        L(
+          "VPN interface (must already be configured in GL.iNet)",
+          "Интерфейс VPN (сначала настройте его в GL.iNet)",
+        ),
+        node("input", null, {
+          value: old.interface || names[0] || "",
+          placeholder: "wgclient / tun0",
+        }),
+      );
+      mode.onchange = () => {
+        tunnel.disabled = mode.value !== "interface";
+      };
+      mode.onchange();
+      box.append(
+        node(
+          "p",
+          L(
+            "Local-only keeps LAN and Wi-Fi communication. Internet is blocked over IPv4 and IPv6. Device rules take priority over network rules.",
+            "«Только локальная сеть» сохраняет общение по LAN и Wi-Fi, блокируя интернет по IPv4 и IPv6. Правило устройства важнее правила сети.",
+          ),
+        ),
+      );
+      box.append(
+        button(
+          L("Apply rule", "Применить правило"),
+          () =>
+            api("set-policy", {
+              kind: kind.value,
+              mac: mac.value,
+              source_interface: source.value,
+              mode: mode.value,
+              interface: tunnel.value,
+              name: name || mac.value,
+            }),
+          true,
+        ),
+      );
+      container.append(box);
+    }
+    function connection(root) {
+      const c = section(L("Connection", "Подключение")),
+        labels = {
+          off: L("Off", "Выключено"),
+          connecting: L("Connecting", "Подключение"),
+          connected: L("Connection verified", "Соединение проверено"),
+          reconnecting: L("Reconnecting", "Восстановление"),
+          error: L("Connection error", "Ошибка подключения"),
+        };
+      c.append(
+        node("div", labels[status.state] || status.state, {
+          className: "status " + (status.state === "connected" ? "good" : ""),
+        }),
+        node(
+          "p",
+          L(
+            "Status is checked through the local VPN proxy using HTTPS.",
+            "Статус проверяется HTTPS-запросом через локальный VPN-прокси.",
+          ),
+        ),
+      );
+      c.append(
+        row(
+          button(
+            status.enabled
+              ? L("Turn off", "Выключить")
+              : L("Connect", "Подключить"),
+            () => api("enabled", { on: !status.enabled }),
+            true,
+          ),
+          button(
+            status.killswitch
+              ? L("Disable internet blocking", "Отключить блокировку интернета")
+              : L("Block internet without VPN", "Блокировать интернет без VPN"),
+            () => api("killswitch", { on: !status.killswitch }),
+          ),
+        ),
+      );
+      c.append(
+        node(
+          "p",
+          L(
+            "Explicit Direct and native VPN rules are exceptions to global blocking. An assigned tunnel fails closed when unavailable.",
+            "Явные правила «Напрямую» и WireGuard/OpenVPN действуют как исключения из общей блокировки. Если назначенный туннель недоступен, интернет блокируется.",
+          ),
+        ),
+      );
+      if (status.warning)
+        c.append(node("p", status.warning, { className: "bad" }));
+      root.append(c);
+      const list = section(L("Servers", "Серверы"));
+      const groups = [
+        ["auto", L("Automatic: all servers", "Автоматически: все серверы")],
+        ["auto-fav", L("Automatic: favorites", "Автоматически: избранное")],
+        ["auto-reality", "VLESS"],
+        ["auto-hy2", "Hysteria2"],
+      ];
+      const pick = field(
+        list,
+        L("Selected connection", "Выбранное подключение"),
+        select(
+          groups.concat(servers.map((s) => [s.tag, s.tag])),
+          status.selected || "auto",
+        ),
+      );
+      list.append(
+        button(
+          L("Select", "Выбрать"),
+          () => api("select", { tag: pick.value }),
+          true,
+        ),
+      );
+      servers.forEach((s) => {
+        const b = button(s.favorite ? "★" : "☆", () =>
+          api("favorite", { tag: s.tag, on: !s.favorite }),
+        );
+        b.setAttribute(
+          "aria-label",
+          (s.favorite ? "Remove favorite: " : "Add favorite: ") + s.tag,
+        );
+        list.append(
+          row(
+            b,
+            node("span", s.tag + " · " + s.type),
+            button(L("Delete", "Удалить"), async () => {
+              if (!confirm(L("Delete this server?", "Удалить этот сервер?")))
+                return;
+              await api("delete-server", { tag: s.tag });
+            }),
+          ),
+        );
+      });
+      list.append(
+        button(
+          L(
+            "Apply favorites and reconnect",
+            "Применить избранное и переподключиться",
+          ),
+          () => api("apply-favorites", {}),
+        ),
+      );
+      root.append(list);
+      const add = section(
+        L("Add servers or subscription", "Добавить серверы или подписку"),
+      );
+      const text = field(
+        add,
+        L(
+          "Links, one per line, or subscription URL",
+          "Ссылки построчно или URL подписки",
+        ),
+        node("textarea"),
+      );
+      add.append(
+        button(
+          L("Add", "Добавить"),
+          async () => {
+            const value = text.value.trim();
+            if (/^https?:\/\//.test(value) && !value.includes("\n"))
+              return api("add-subscription", { url: value });
+            return api("import", { text: value });
+          },
+          true,
+        ),
+        button(L("Refresh subscriptions", "Обновить подписки"), () =>
+          api("refresh-subscriptions", {}),
+        ),
+      );
+      subscriptions.forEach((sub) =>
+        add.append(
+          row(
+            node(
+              "span",
+              (sub.name || sub.id) +
+                " · " +
+                sub.count +
+                " " +
+                L("servers", "серверов"),
+            ),
+            button(L("Delete subscription", "Удалить подписку"), async () => {
+              if (
+                !confirm(
+                  L(
+                    "Delete the subscription and its servers?",
+                    "Удалить подписку и её серверы?",
+                  ),
+                )
+              )
+                return;
+              await api("delete-subscription", { id: sub.id });
+            }),
+          ),
+        ),
+      );
+      root.append(add);
+    }
+    function routing(root) {
+      const s = status.settings,
+        c = section(L("Routing and DNS", "Маршрутизация и DNS"));
+      const defaultRoute = field(
+        c,
+        L("Default for devices", "По умолчанию для устройств"),
+        select(
+          [
+            ["sing-box", "Sing-box VPN"],
+            [
+              "router",
+              L("Router routing (GL.iNet)", "Маршрутизация роутера (GL.iNet)"),
+            ],
+          ],
+          s.default_route,
+        ),
+      );
+      const mode = field(
+        c,
+        L("Domains profile", "Профиль доменов"),
+        select(
+          [
+            ["all", L("All traffic through VPN", "Весь трафик через VPN")],
+            [
+              "include",
+              L(
+                "Only these domains through VPN",
+                "Только эти домены через VPN",
+              ),
+            ],
+            ["exclude", L("These domains bypass VPN", "Эти домены напрямую")],
+          ],
+          s.routing,
+        ),
+      );
+      const domains = field(
+        c,
+        L("Domains, one per line", "Домены, по одному в строке"),
+        node("textarea", null, { value: array(s.domains).join("\n") }),
+      );
+      const block = field(
+        c,
+        L("Blocked domains", "Блокируемые домены"),
+        node("textarea", null, { value: array(s.block_domains).join("\n") }),
+      );
+      const dns = field(
+        c,
+        "DNS",
+        select(
+          [
+            ["udp", "UDP"],
+            ["https", "DNS over HTTPS"],
+          ],
+          s.dns,
+        ),
+      );
+      const address = field(
+        c,
+        L("DNS address", "Адрес DNS"),
+        node("input", null, { value: s.dns_address }),
+      );
+      const hours = field(
+        c,
+        L(
+          "Subscription refresh, hours (1–168)",
+          "Обновление подписок, часов (1–168)",
+        ),
+        node("input", null, {
+          type: "number",
+          min: 1,
+          max: 168,
+          value: s.subscription_hours,
+        }),
+      );
+      const details = node("details");
+      details.append(
+        node(
+          "summary",
+          L("Advanced network settings", "Дополнительные настройки сети"),
+        ),
+      );
+      const wan = field(
+        details,
+        L("Physical WAN network name", "Имя физической WAN-сети"),
+        node("input", null, { value: s.wan }),
+      );
+      const lan = field(
+        details,
+        L(
+          "Local interfaces, separated by spaces",
+          "Локальные интерфейсы через пробел",
+        ),
+        node("input", null, { value: array(s.lan_interfaces).join(" ") }),
+      );
+      c.append(
+        details,
+        node(
+          "p",
+          L(
+            "Domain profiles apply to Sing-box VPN clients. Router DNS (dnsmasq / AdGuard Home) remains configured in GL.iNet. Existing VLANs can be selected; physical port assignment stays in network settings.",
+            "Профили доменов применяются к клиентам Sing-box VPN. DNS роутера (dnsmasq / AdGuard Home) настраивается в GL.iNet. Можно выбрать готовую VLAN; назначение физических портов выполняется в настройках сети.",
+          ),
+        ),
+        button(
+          L("Save and reconnect", "Сохранить и переподключиться"),
+          () =>
+            api("set-settings", {
+              ...s,
+              default_route: defaultRoute.value,
+              routing: mode.value,
+              domains: domains.value.split(/\s+/).filter(Boolean),
+              block_domains: block.value.split(/\s+/).filter(Boolean),
+              dns: dns.value,
+              dns_address: address.value,
+              subscription_hours: Number(hours.value),
+              wan: wan.value,
+              lan_interfaces: lan.value.split(/\s+/).filter(Boolean),
+            }),
+          true,
+        ),
+      );
+      root.append(c);
+    }
+    function download(name, data) {
+      const url = URL.createObjectURL(
+          new Blob([JSON.stringify(data, null, 2)], {
+            type: "application/json",
+          }),
+        ),
+        a = node("a", null, { href: url, download: name });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    function service(root) {
+      const c = section(
+        L("Service and diagnostics", "Обслуживание и диагностика"),
+      );
+      c.append(
+        node(
+          "p",
+          "sing-box " +
+            status.core +
+            " · " +
+            L("Manager", "Менеджер") +
+            " " +
+            status.version,
+        ),
+        node(
+          "p",
+          L(
+            "Backup contains private keys, passwords and subscription URLs. Keep it offline. Restore instructions are in the project README.",
+            "Резервная копия содержит ключи, пароли и URL подписок. Храните её офлайн. Инструкция восстановления находится в README проекта.",
+          ),
+        ),
+        row(
+          button(L("Download backup", "Скачать резервную копию"), async () =>
+            download("vpn-backup.json", await api("backup")),
+          ),
+          button(L("Download diagnostics", "Скачать диагностику"), async () =>
+            download("vpn-diagnostics.json", await api("diagnostics")),
+          ),
+        ),
+      );
+      c.append(
+        node("p", status.ipv6),
+        node(
+          "p",
+          L(
+            "WireGuard and OpenVPN are configured in the native GL.iNet VPN panel. This manager binds devices to existing interfaces; it does not create a chain of tunnels.",
+            "WireGuard и OpenVPN настраиваются в штатной панели GL.iNet. Здесь устройства привязываются к готовым интерфейсам, без создания цепочки туннелей.",
+          ),
+        ),
+      );
+      root.append(c);
+    }
+    function render() {
+      document.documentElement.lang = ru ? "ru" : "en";
+      $("#title").textContent = L("VPN connections", "VPN-подключения");
+      $("#language").textContent = ru ? "English" : "Русский";
+      $("#logout").hidden = native;
+      $("#logout").textContent = L("Log out", "Выйти");
+      if (!status.settings) return;
+      $("#nav").replaceChildren();
+      [
+        ["connection", L("Connection", "Подключение")],
+        ["devices", L("Devices", "Устройства")],
+        ["routing", L("Routing", "Маршрутизация")],
+        ["service", L("Service", "Обслуживание")],
+      ].forEach(([id, title]) => {
+        const b = button(title, async () => {
+          tab = id;
+          render();
+        });
+        b.className = tab === id ? "active" : "";
+        $("#nav").append(b);
+      });
+      const root = $("#content");
+      root.replaceChildren();
+      if (tab === "connection") connection(root);
+      if (tab === "routing") routing(root);
+      if (tab === "service") service(root);
+      if (tab === "devices") {
+        const c = section(
+          L("Device access rules", "Правила доступа устройств"),
+        );
+        c.append(
+          node(
+            "p",
+            L(
+              "The router identifies devices by MAC. A device can change its MAC; use a separate VLAN for an isolation boundary. Local access includes router services such as DNS. Disable vendor hardware acceleration before relying on these rules.",
+              "Устройства определяются по MAC, который можно изменить. Для границы изоляции используйте отдельную VLAN. Локальный доступ включает службы роутера, например DNS. Перед использованием ограничений отключите аппаратное ускорение производителя.",
+            ),
+          ),
+        );
+        array(devices.devices).forEach((d) => policyEditor(c, d));
+        const detail = node("details");
+        detail.append(
+          node(
+            "summary",
+            L(
+              "Add device / network rule",
+              "Добавить правило устройства / сети",
+            ),
+          ),
+        );
+        policyEditor(detail);
+        c.append(detail);
+        root.append(c);
+      }
+    }
+    async function load() {
+      const result = await api("status");
+      status = result;
+      [devices, result.servers, result.subs] = await Promise.all([
+        api("devices"),
+        api("servers"),
+        api("subscriptions"),
+      ]);
+      subscriptions = array(result.subs.subs);
+      servers = array(result.servers.servers);
+      if (result.servers.selected) status.selected = result.servers.selected;
+      $("#login").hidden = true;
+      $("#nav").hidden = false;
+      $("#content").hidden = false;
+      render();
+    }
+    $("#language").onclick = () => {
+      ru = !ru;
+      localStorage.vpnLanguage = ru ? "ru" : "en";
+      render();
+    };
+    $("#logout").onclick = async () => {
+      await fetch("/cgi-bin/api?action=logout", { credentials: "same-origin" });
+      location.reload();
+    };
+    $("#loginform").onsubmit = async (e) => {
+      e.preventDefault();
+      const r = await fetch("/cgi-bin/api?action=login", {
+          method: "POST",
+          credentials: "same-origin",
+          body: $("#password").value,
+        }),
+        j = await r.json();
+      $("#password").value = "";
+      if (j.ok) {
+        say("");
+        load().catch((e) => say(e.message, true));
+      } else
+        say(
+          j.locked
+            ? "Please wait " + j.wait + " seconds"
+            : "Incorrect password",
+          true,
+        );
+    };
+    load().catch((e) => say(e.message, true));
+    poll = setInterval(async () => {
+      if (busy || !$("#login").hidden) return;
+      try {
+        status = await api("status");
+        if (tab === "connection") {
+          const labels = {
+            off: L("Off", "Выключено"),
+            connecting: L("Connecting", "Подключение"),
+            connected: L("Connection verified", "Соединение проверено"),
+            reconnecting: L("Reconnecting", "Восстановление"),
+            error: L("Connection error", "Ошибка подключения"),
+          };
+          const el = $(".status");
+          if (el) {
+            el.textContent = labels[status.state] || status.state;
+            el.className =
+              "status " + (status.state === "connected" ? "good" : "");
+          }
+        }
+      } catch (e) {
+        say(e.message, true);
+      }
+    }, 15000);
+  </script>
+</html>

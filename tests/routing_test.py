@@ -85,6 +85,7 @@ class RoutingTests(unittest.TestCase):
         source = (ROOT / 'rebuild.sh').read_text().replace('/etc/init.d/sing-box', str(service))
         safe = self.base / 'rebuild.sh'
         safe.write_text(source)
+        (self.sb / 'runtime-lib.sh').write_text((ROOT / 'runtime-lib.sh').read_text())
         result = subprocess.run(['sh', str(safe)], env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.sb / 'service-calls').exists(), 'validation started the VPN')
@@ -94,7 +95,7 @@ class RoutingTests(unittest.TestCase):
         cfg = self.rebuild()
         dns = {s['tag']: s for s in cfg['dns']['servers']}
         self.assertEqual(dns['remote'].get('detour'), 'select')
-        self.assertEqual(dns['direct-dns'].get('detour'), 'direct')
+        self.assertNotIn('detour', dns['direct-dns'])
         self.assertEqual(cfg['route']['default_domain_resolver'], 'direct-dns')
         self.assertEqual(next(s for s in cfg['outbounds'] if s['tag'] == 'auto-fav')['outbounds'], ['test'])
 
@@ -104,7 +105,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_empty_config_dns_direct(self):
         cfg = self.rebuild(False)
-        self.assertEqual(cfg['dns']['servers'][0].get('detour'), 'direct')
+        self.assertNotIn('detour', cfg['dns']['servers'][0])
         self.assertEqual(cfg['route']['final'], 'direct')
 
     def test_both_families_and_tunnels(self):

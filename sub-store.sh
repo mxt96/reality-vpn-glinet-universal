@@ -1,4 +1,5 @@
 #!/bin/sh
+umask 077
 # sub-store.sh — saved subscriptions with auto-update (Happ-style).
 #
 # Happ re-pulls every subscription on app open and keeps the server list in sync.
@@ -73,7 +74,7 @@ pull() (
         fi
       done
     fi
-    find "$_stage" -depth -delete
+    rm -rf "$_stage"
   }
   trap cleanup EXIT
   trap 'exit 1' HUP INT TERM
@@ -94,6 +95,9 @@ pull() (
     done < "$SUBS/$_id.tags"
   fi
   cp "$REBUILD" "$_stage/rebuild.sh" || return 1
+  for _helper in runtime-lib.sh manager.lua settings.json policies.json selected; do
+    [ ! -f "$SBDIR/$_helper" ] || cp "$SBDIR/$_helper" "$_stage/$_helper" || return 1
+  done
   _out=$(printf '%s' "$_url" | env SBDIR="$_stage" REBUILD_CHECK_ONLY=1 sh "$IMPORT" 2>/dev/null) || return 1
   _added=$(printf '%s' "$_out" | sed -n 's/.*"added":\([0-9]*\).*/\1/p')
   if ! printf '%s' "$_out" | grep -q '"ok":true' || [ "${_added:-0}" -eq 0 ]; then return 1; fi
@@ -124,6 +128,38 @@ pull() (
   _committed=1
   grab_meta "$_id" "$_url"
   printf '%s %s' "$_added" "$_removed"
+)
+
+remove_sub() (
+  _id="$1"; _committed=0; _removed=0
+  _stage=$(mktemp -d "$SBDIR/.sub-delete.XXXXXX") || return 1
+  cleanup_delete(){
+    if [ "$_committed" = 0 ]; then
+      for _f in "$_stage/servers/"*.json; do [ ! -f "$_f" ] || mv "$_f" "$SRV/"; done
+      for _ext in url tags upd meta; do
+        [ ! -f "$_stage/$_id.$_ext" ] || cp "$_stage/$_id.$_ext" "$SUBS/$_id.$_ext"
+      done
+      sh "$REBUILD" >/dev/null 2>&1
+    fi
+    rm -rf "$_stage"
+  }
+  trap cleanup_delete EXIT
+  trap 'exit 1' HUP INT TERM
+  mkdir "$_stage/servers" || return 1
+  for _ext in url tags upd meta; do
+    [ ! -f "$SUBS/$_id.$_ext" ] || cp "$SUBS/$_id.$_ext" "$_stage/$_id.$_ext" || return 1
+  done
+  if [ -f "$SUBS/$_id.tags" ]; then
+    while IFS= read -r _t; do
+      case "$_t" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+      if [ -f "$SRV/$_t.json" ]; then mv "$SRV/$_t.json" "$_stage/servers/" || return 1; _removed=$((_removed+1)); fi
+    done < "$SUBS/$_id.tags"
+  fi
+  _result=$(sh "$REBUILD" 2>/dev/null | head -1)
+  [ "$_result" = OK ] || return 1
+  rm -f "$SUBS/$_id.url" "$SUBS/$_id.tags" "$SUBS/$_id.upd" "$SUBS/$_id.meta" || return 1
+  _committed=1
+  printf '%s' "$_removed"
 )
 
 CMD="$1"; shift 2>/dev/null
@@ -187,15 +223,8 @@ case "$CMD" in
     ID="$1"
     case "$ID" in *[!A-Za-z0-9._-]*|"") echo '{"ok":false,"msg":"bad id"}'; exit 0 ;; esac
     [ -f "$SUBS/$ID.url" ] || { echo '{"ok":false,"msg":"no such subscription"}'; exit 0; }
-    RM=0
-    if [ -f "$SUBS/$ID.tags" ]; then
-      while IFS= read -r t; do [ -z "$t" ] && continue
-        [ -f "$SRV/$t.json" ] && { rm -f "$SRV/$t.json"; RM=$((RM+1)); }
-      done < "$SUBS/$ID.tags"
-    fi
-    rm -f "$SUBS/$ID.url" "$SUBS/$ID.tags" "$SUBS/$ID.upd"
-    sh "$REBUILD" >/dev/null 2>&1
-    printf '{"ok":true,"removed":%s}\n' "$RM"
+    if RM=$(remove_sub "$ID"); then printf '{"ok":true,"removed":%s}\n' "$RM"
+    else echo '{"ok":false,"msg":"Subscription deletion failed; previous servers restored"}'; fi
     ;;
 
   refresh)
