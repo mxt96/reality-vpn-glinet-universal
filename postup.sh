@@ -1,6 +1,10 @@
 #!/bin/sh
 # Route LAN clients through the sing-box tun — but FAIL-OPEN. table 2022 = sing-box auto_route.
 # LAN subnet auto-detected (works on any GL.iNet LAN). Idempotent. Runs from cron every 2 min.
+SBDIR=${SBDIR:-/etc/sing-box}
+if [ -f "$SBDIR/manager.lua" ]; then
+  exec lua "$SBDIR/manager.lua" apply
+fi
 LAN=$(ip -4 route show dev br-lan scope link 2>/dev/null | awk 'NR==1{print $1}')
 [ -z "$LAN" ] && LAN=$(ip -4 -o addr show br-lan 2>/dev/null | awk 'NR==1{print $4}')
 [ -z "$LAN" ] && exit 0

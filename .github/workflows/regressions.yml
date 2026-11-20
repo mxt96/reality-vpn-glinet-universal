@@ -1,0 +1,41 @@
+name: VPN manager regressions
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    container: alpine:3.22
+    steps:
+      - name: Install test tools
+        run: apk add --no-cache git python3 lua5.1 lua-cjson bash
+      - uses: actions/checkout@v4
+      - name: Check shell and Lua syntax
+        run: |
+          ln -sf /usr/bin/lua5.1 /usr/bin/lua
+          for f in *.sh panel/api panel/vpn-panel.init; do sh -n "$f"; done
+          luac5.1 -p manager.lua sdk4-tab/reality.oui.lua sdk4-tab/reality.validator.lua
+      - name: Run isolated backend tests
+        run: |
+          python3 tests/parser_regressions.py
+          python3 tests/cli_regressions.py
+          python3 tests/backend_regressions.py
+          python3 tests/routing_test.py
+          python3 tests/manager_regressions.py
+  browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save playwright@1.56.1 vue@2.7.16
+      - name: Select installed Chrome or install Chromium
+        run: |
+          browser_path=$(command -v google-chrome || command -v google-chrome-stable || true)
+          if [ -n "$browser_path" ]; then
+            echo "CHROMIUM_PATH=$browser_path" >> "$GITHUB_ENV"
+          else
+            npx playwright install --with-deps chromium
+          fi
+      - run: node tests/ui-panel.cjs && node tests/ui-manager.cjs

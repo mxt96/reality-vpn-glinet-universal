@@ -529,7 +529,7 @@
             h("div", { style: { fontSize: "17px", fontWeight: "800" } }, [t._v(hdrCountry)]),
             h("div", { style: { fontSize: "12.5px", color: C.se, marginTop: "1px" } }, [t._v(hdrSub)])
           ]),
-          h("span", { style: { fontSize: "11px", color: C.ye, background: "#fff6e6", padding: "4px 10px", borderRadius: "12px" } }, [t._v(t.vpnOn ? "Connection not verified" : "VPN off")])
+          h("span", { style: { fontSize: "11px", color: C.ye, background: "#fff6e6", padding: "4px 10px", borderRadius: "12px" } }, [t._v(t.vpnOn ? (s.state === "connected" ? "Connection verified" : s.state === "error" ? "Connection error" : s.state === "reconnecting" ? "Reconnecting…" : "Connection not verified") : "VPN off")])
         ]),
         h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr" } }, [
           cell("LAST REPORTED IP", live ? val(s.egress) : dim(), true),
@@ -764,6 +764,7 @@
 
       return h("div", { staticClass: "reality-wrapper" }, [
         h("h2", { style: { margin: "0 0 16px", fontSize: "22px" } }, [t._v("Sing-box VPN")]),
+        h("p", {}, [h("a", { attrs: { href: "/vpn-manager.html?native=1", target: "_blank", rel: "noopener" } }, [t._v("Device access, routing, DNS and diagnostics")])]),
         banner,
         netCard,
         controlsCard,

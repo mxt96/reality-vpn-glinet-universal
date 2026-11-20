@@ -1,10 +1,11 @@
 #!/bin/sh
+umask 077
 # ============================================================================
 # Reality / Hysteria2 VPN for GL.iNet routers — CREDS-FREE, ARCH-UNIVERSAL.
 #
 # No binary and no credentials are bundled. At install time this script:
 #   1. detects the router CPU arch and downloads the matching sing-box release
-#      from github.com/SagerNet/sing-box (latest stable),
+#      from github.com/SagerNet/sing-box (pinned, SHA-256 verified),
 #   2. installs scripts to /etc/sing-box, an init.d service, cron jobs,
 #   3. generates a valid DIRECT-only config (internet stays up with 0 servers).
 # You add YOUR server afterwards with:  add-server.sh '<your share-link>'
@@ -60,16 +61,21 @@ say "selected sing-box asset arch: $ASSET"
 case "$ASSET" in
   linux-arm64)            EXPECT="ARM aarch64" ;;
   linux-armv7)            EXPECT="ARM," ;;
-  linux-mips-softfloat)   EXPECT="MIPS.*MSB" ;;   # big-endian
-  linux-mipsle-softfloat) EXPECT="MIPS.*LSB" ;;   # little-endian
+  linux-mips-softfloat)   EXPECT="MSB.*MIPS" ;;   # big-endian
+  linux-mipsle-softfloat) EXPECT="LSB.*MIPS" ;;   # little-endian
   linux-amd64)            EXPECT="x86-64" ;;
 esac
 
 # ---- 2) resolve latest stable tag + download -------------------------------
-TAG=$(curl -4 -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-[ -n "$TAG" ] || die "could not fetch latest sing-box release tag (no internet / GitHub blocked)."
-VER=${TAG#v}
+VER=$(tr -d ' \r\n' < "$D/SING_BOX_VERSION")
+case "$VER" in ''|*[!0-9.]*) die "invalid pinned sing-box version" ;; esac
+TAG="v$VER"
+[ -s "$D/sing-box-checksums.txt" ] || die "checksum manifest missing"
+# Policy routing needs full iproute2, both firewall families, and a JSON parser.
+opkg update || die "cannot update package lists"
+opkg install curl ca-bundle ip-full kmod-tun lua lua-cjson || die "cannot install required packages"
+command -v lua >/dev/null 2>&1 || die "Lua is unavailable"
+lua -e 'require "cjson"' || die "Lua cjson is unavailable"
 # Probe `sing-box version`. NOTE: do NOT drop_caches here. On a 128MB router (E750) the
 # ~58MB Go binary needs its code pages resident to run; dropping the page cache right
 # before exec forces a cold ~58MB fault under the memory pressure left by the just-
@@ -91,15 +97,15 @@ sb_version() {
 # never get installed. To force a fresh sing-box: rm "$SBDIR/sing-box" then re-run.
 VOUT=""
 EXIST=$(sb_version || true)
-if [ -n "$EXIST" ]; then
+if [ "$EXIST" = "sing-box version $VER" ]; then
   VOUT="$EXIST"; mkdir -p "$SBDIR/servers"
   say "sing-box already installed ($EXIST) -> reusing, skipping download"
 fi
 if [ -z "$VOUT" ]; then
 # download (~20MB tarball) + extracted sing-box (~60MB) need a roomy dir. /tmp is
 # tmpfs (RAM) and too small on tiny routers (E750/AR300M) -> "No space left". Pick a
-# writable mount with >=85MB free (microSD/USB/overlay); die clearly if none.
-NEEDK=87040
+# writable mount with >=160MB free (microSD/USB/overlay); die clearly if none.
+NEEDK=163840
 WORKBASE=""
 for c in /mnt/mmcblk0p1 /mnt/sda1 /mnt/sdcard /tmp/mountd/disk1_part1 /overlay; do
   [ -d "$c" ] || continue
@@ -109,7 +115,7 @@ done
 if [ -z "$WORKBASE" ]; then
   WORKBASE=$(df -k 2>/dev/null | awk 'NR>1 && $4>='"$NEEDK"' {print $6}' | while read m; do [ -w "$m" ] && { echo "$m"; break; }; done)
 fi
-[ -n "$WORKBASE" ] || die "need ~85MB free to unpack sing-box, none found. Insert a microSD card (it auto-mounts) and re-run."
+[ -n "$WORKBASE" ] || die "need ~160MB free to unpack sing-box, none found. Insert a microSD card (it auto-mounts) and re-run."
 say "work/extract dir: $WORKBASE ($(df -h "$WORKBASE" 2>/dev/null | awk 'NR==2{print $4}') free)"
 SDHOME="$WORKBASE"
 mkdir -p "$SBDIR/servers"
@@ -125,7 +131,7 @@ mkdir -p "$SBDIR/servers"
 # mips/mipsle/armv7 have NO `-musl` suffix (the plain build is already musl-static),
 # so trying `-musl` there just 404s — try plain only. (PLAIN = the empty suffix.)
 case "$ASSET" in
-  linux-arm64|linux-amd64) SUFFIXES="-musl PLAIN" ;;
+  linux-arm64|linux-amd64) SUFFIXES="-musl" ;;
   *)                       SUFFIXES="PLAIN" ;;
 esac
 VOUT=""
@@ -135,6 +141,11 @@ for SUF in $SUFFIXES; do
   say "trying sing-box $TAG (${ASSET}${SUF})"
   TMP=$(mktemp -d "$SDHOME/sbdl.XXXXXX") || continue
   if ! curl -4 -fL --retry 2 --connect-timeout 15 -o "$TMP/sb.tgz" "$URL"; then rm -rf "$TMP"; continue; fi
+  ARCHIVE="sing-box-${VER}-${ASSET}${SUF}.tar.gz"
+  HASH=$(awk -v name="$ARCHIVE" '$2==name{print $1}' "$D/sing-box-checksums.txt")
+  if [ -z "$HASH" ] || [ "$(sha256sum "$TMP/sb.tgz" | awk '{print $1}')" != "$HASH" ]; then
+    rm -rf "$TMP"; die "SHA-256 mismatch for $ARCHIVE"
+  fi
   if ! tar xzf "$TMP/sb.tgz" -C "$TMP" 2>/dev/null; then rm -rf "$TMP"; continue; fi
   BIN=$(find "$TMP" -name sing-box -type f | head -1)
   [ -n "$BIN" ] || { rm -rf "$TMP"; continue; }
@@ -250,7 +261,8 @@ set -e   # restore strict mode after best-effort swap provisioning
 
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
-         add-server.sh list-servers.sh del-server.sh import-links.sh sub-store.sh; do
+         add-server.sh list-servers.sh del-server.sh import-links.sh sub-store.sh \
+         runtime-lib.sh select-server.sh monitor.sh control.sh subscriptions-refresh.sh manager.lua; do
   cp "$D/$s" "$SBDIR/$s" && chmod +x "$SBDIR/$s"
 done
 # MAC privacy removed from the panel — GL.iNet's newer firmware has a native
@@ -278,7 +290,7 @@ say "installed version: $(cat "$SBDIR/version" 2>/dev/null)"
 # ---- 6) sing-box service ---------------------------------------------------
 cat > /etc/init.d/sing-box <<'EOF'
 #!/bin/sh /etc/rc.common
-START=99
+START=95
 STOP=10
 USE_PROCD=1
 start_service() {
@@ -295,15 +307,17 @@ start_service() {
   ip link del singtun0 2>/dev/null
   procd_open_instance
   procd_set_param command /etc/sing-box/sing-box run -c /etc/sing-box/reality_full.json
-  procd_set_param respawn
+  procd_set_param respawn 3600 5 5
+  procd_set_param stdout 1
+  procd_set_param stderr 1
   procd_close_instance
 }
 EOF
 chmod +x /etc/init.d/sing-box
+/etc/init.d/sing-box disable 2>/dev/null || true
 /etc/init.d/sing-box enable 2>/dev/null || true
 
 # ---- 7) generate base config (0 servers -> direct, internet up) ------------
-sh "$SBDIR/rebuild.sh" >/dev/null 2>&1 || true
 # Desired-state flag (source of truth for the supervisor + boot autostart + KS gate).
 # Preserve an existing choice across upgrades; otherwise default ON iff servers are
 # already configured (matches the previous "start if servers exist" behaviour).
@@ -314,84 +328,70 @@ fi
 # fresh install with no servers (or VPN left off): leave sing-box stopped.
 [ "$(cat "$SBDIR/vpn.enabled" 2>/dev/null)" = "1" ] || /etc/init.d/sing-box stop 2>/dev/null || true
 
-# ---- 8) firewall: fw4/nftables vs fw3/iptables -----------------------------
-# Detect by the live nft table (definitive — `[ -x /sbin/fw4 ]` is unreliable, and
-# `iptables` is present on fw4 too as an nft-compat shim whose rules land in a
-# SEPARATE table fw4 ignores -> LAN clients don't forward into the tun). On fw4 we
-# add the LAN->tunnel forwarding directly into the `inet fw4` table via a
-# hotplug-firewall hook so it survives reboots AND fw4 reloads (which flush it).
-if nft list table inet fw4 >/dev/null 2>&1; then
-  say "firewall: fw4/nftables detected -> installing nft forwarding hook"
-  mkdir -p /etc/hotplug.d/firewall
-  cat > /etc/hotplug.d/firewall/99-reality-fwd <<'EOF'
-#!/bin/sh
-# Re-apply Reality VPN LAN->tunnel forwarding into the fw4 nft table on every
-# firewall reload (fw4 flushes custom rules on reload). Idempotent; harmless when
-# the tunnel is down (rules just don't match until singtun0 appears).
-command -v nft >/dev/null 2>&1 || exit 0
-nft list table inet fw4 >/dev/null 2>&1 || exit 0
-nft -a list chain inet fw4 forward 2>/dev/null | grep -q 'oifname "singtun0" accept' || nft insert rule inet fw4 forward oifname singtun0 accept 2>/dev/null
-nft -a list chain inet fw4 forward 2>/dev/null | grep -q 'iifname "singtun0" accept'  || nft insert rule inet fw4 forward iifname singtun0 accept 2>/dev/null
-nft -a list chain inet fw4 srcnat  2>/dev/null | grep -q 'oifname "singtun0" masquerade' || nft add rule inet fw4 srcnat oifname singtun0 masquerade 2>/dev/null
-exit 0
-EOF
-  chmod +x /etc/hotplug.d/firewall/99-reality-fwd
-  grep -qxF /etc/hotplug.d/firewall/99-reality-fwd /etc/sysupgrade.conf 2>/dev/null || echo /etc/hotplug.d/firewall/99-reality-fwd >> /etc/sysupgrade.conf 2>/dev/null || true
-  ACTION=reload sh /etc/hotplug.d/firewall/99-reality-fwd
-  say "fw4 forwarding hook installed (survives reboot + firewall reloads)."
-else
-  if [ -d /proc/sys/net/ipv6 ] && ! command -v ip6tables >/dev/null 2>&1; then
-    say "Installing ip6tables for IPv6 kill switch protection..."
-    opkg update && opkg install ip6tables || die "cannot install ip6tables; IPv6 kill switch protection is unavailable"
-    command -v ip6tables >/dev/null 2>&1 || die "ip6tables is still unavailable"
-  fi
-  say "firewall: iptables/fw3 path active (postup.sh installs FORWARD+MASQUERADE rules)."
+# ---- 8) policy manager: boot, firewall reload, native VPN and WAN changes ----
+if ! nft list table inet fw4 >/dev/null 2>&1; then
+  opkg install iptables ip6tables iptables-mod-extra || die "dual-stack firewall support unavailable"
 fi
-
-# ---- 8b) killswitch boot + firewall-reload re-assert (universal, fw3+fw4) ---
-# The killswitch is a standing block re-checked by cron every 30s, but cron's first
-# tick can be up to 60s after boot, and a firewall reload can momentarily drop custom
-# rules -> a brief leak window EXACTLY when a server dies / the router reboots. A
-# firewall hotplug hook fires at boot (firewall start) and on every reload, on BOTH
-# fw3 and fw4, so the killswitch is reconciled immediately. ks_enforce is idempotent
-# and self-removing when disarmed, so the hook is a no-op while the killswitch is OFF.
-mkdir -p /etc/hotplug.d/firewall
-cat > /etc/hotplug.d/firewall/99-reality-ks <<'EOF'
+sh "$SBDIR/rebuild.sh" || die "configuration or runtime validation failed"
+# Remove old broad forwarding hooks before enabling device restrictions.
+rm -f /etc/hotplug.d/firewall/99-reality-fwd /etc/hotplug.d/firewall/99-reality-ks
+# Clean only known legacy rules, preserving other packages' routes/firewall.
+for fw in iptables ip6tables; do
+  while "$fw" -C FORWARD -i br-lan -o singtun0 -j ACCEPT 2>/dev/null; do
+    "$fw" -D FORWARD -i br-lan -o singtun0 -j ACCEPT
+  done
+done
+while ip rule del from all lookup 2022 pref 500 2>/dev/null; do :; done
+LAN_OLD=$(ip -4 route show dev br-lan scope link | awk 'NR==1{print $1}')
+[ -z "$LAN_OLD" ] || { while ip rule del from "$LAN_OLD" lookup 2022 pref 500 2>/dev/null; do :; done; }
+mkdir -p /etc/hotplug.d/firewall /etc/hotplug.d/iface
+cat > /etc/hotplug.d/firewall/99-sb-policy <<'EOF'
 #!/bin/sh
-[ -r /etc/sing-box/ks-lib.sh ] || exit 0
-. /etc/sing-box/ks-lib.sh
-ks_enforce
+[ -f /etc/sing-box/manager.lua ] || exit 0
+lua /etc/sing-box/manager.lua apply </dev/null | logger -t vpn-policy
 EOF
-chmod +x /etc/hotplug.d/firewall/99-reality-ks
-grep -qxF /etc/hotplug.d/firewall/99-reality-ks /etc/sysupgrade.conf 2>/dev/null || echo /etc/hotplug.d/firewall/99-reality-ks >> /etc/sysupgrade.conf 2>/dev/null || true
-ACTION=reload sh /etc/hotplug.d/firewall/99-reality-ks
-say "killswitch boot/reload hook installed (no leak window on boot or fw reload)."
-
-# ---- 9) cron: LAN forwarding re-apply, supervisor + killswitch, geo cache --
-# supervisor (auto-reconnect) and killswitch re-assert every 30s. cron's finest
-# granularity is 60s, so each runs twice a minute (:00 and :30).
+cp /etc/hotplug.d/firewall/99-sb-policy /etc/hotplug.d/iface/99-sb-policy
+chmod +x /etc/hotplug.d/firewall/99-sb-policy /etc/hotplug.d/iface/99-sb-policy
+# Firewall includes execute after fw3/fw4 builds its rules, including boot.
+uci -q delete firewall.sb_policy || true
+uci set firewall.sb_policy=include
+uci set firewall.sb_policy.path='/etc/hotplug.d/firewall/99-sb-policy'
+uci set firewall.sb_policy.reload='1'
+uci set firewall.sb_policy.fw4_compatible='1'
+uci commit firewall
+cat > /etc/init.d/vpn-monitor <<'EOF'
+#!/bin/sh /etc/rc.common
+START=99
+STOP=09
+USE_PROCD=1
+start_service() {
+  procd_open_instance
+  procd_set_param command /bin/sh /etc/sing-box/monitor.sh
+  procd_set_param respawn 3600 5 5
+  procd_set_param stdout 1
+  procd_set_param stderr 1
+  procd_close_instance
+}
+EOF
+chmod +x /etc/init.d/vpn-monitor
+/etc/init.d/vpn-monitor disable 2>/dev/null || true
+/etc/init.d/vpn-monitor enable
 CR=/etc/crontabs/root; touch "$CR"
-# drop any prior lines we own, then re-add cleanly (idempotent across upgrades)
-grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync|sub-store)' "$CR" > "$CR.tmp" 2>/dev/null || true; mv "$CR.tmp" "$CR"
+grep -vE 'sing-box/(postup|watchdog|geo-refresh|ks-sync|sub-store|subscriptions-refresh)' "$CR" > "$CR.tmp" || true
+mv "$CR.tmp" "$CR"
 {
-  echo '*/2 * * * * /bin/sh /etc/sing-box/postup.sh'
   echo '*/5 * * * * /bin/sh /etc/sing-box/geo-refresh.sh'
-  echo '* * * * * /bin/sh /etc/sing-box/watchdog.sh'
-  echo '* * * * * sleep 30; /bin/sh /etc/sing-box/watchdog.sh'
-  echo '* * * * * /bin/sh /etc/sing-box/ks-sync.sh'
-  echo '* * * * * sleep 30; /bin/sh /etc/sing-box/ks-sync.sh'
-  # Happ-style auto-update: re-pull every saved subscription every 6h (no-op if none)
-  echo '17 */6 * * * /bin/sh /etc/sing-box/sub-store.sh refresh all >/dev/null 2>&1'
+  echo '* * * * * /bin/sh /etc/sing-box/watchdog.sh >/dev/null 2>&1'
+  echo '17 * * * * /bin/sh /etc/sing-box/subscriptions-refresh.sh >/dev/null 2>&1'
 } >> "$CR"
-/etc/init.d/cron enable 2>/dev/null || true
-/etc/init.d/cron restart 2>/dev/null || true
-
-# SAFETY: fresh install -> killswitch OFF by default (only set the flag if GL's rule
-# exists; never create a partial rule). With ks-sync's VPN-gate + postup fail-open,
-# a down/unconfigured VPN can never strand the LAN without internet.
-uci -q get route_policy.@rule[0].killswitch >/dev/null 2>&1 && \
-  { uci -q set route_policy.@rule[0].killswitch='0'; uci -q commit route_policy; }
-sh "$SBDIR/ks-sync.sh" 2>/dev/null || true
+/etc/init.d/cron enable
+/etc/init.d/cron restart
+lua "$SBDIR/manager.lua" apply </dev/null || die "policy firewall validation failed"
+sh "$SBDIR/ks-sync.sh" || die "could not reconcile leak protection"
+/etc/init.d/vpn-monitor restart
+for keep in /etc/sing-box/ /etc/init.d/sing-box /etc/init.d/vpn-monitor /etc/hotplug.d/firewall/99-sb-policy /etc/hotplug.d/iface/99-sb-policy; do
+  grep -qxF "$keep" /etc/sysupgrade.conf 2>/dev/null || echo "$keep" >> /etc/sysupgrade.conf
+done
 
 # ---- 9b) web control panel (:8088, browser UI, firmware-agnostic) ----------
 # uhttpd + POSIX-sh CGI: add/manage servers from a browser, no terminal needed.
@@ -404,8 +404,11 @@ if [ -f "$D/panel/index.html" ] && [ -f "$D/panel/api" ] && [ -f "$D/panel/vpn-p
     say "openssl missing -> installing via opkg..."; opkg update >/dev/null 2>&1; opkg install openssl-util >/dev/null 2>&1
   fi
   mkdir -p /www-vpn/cgi-bin
+  chmod 755 /www-vpn /www-vpn/cgi-bin
   cp "$D/panel/index.html" /www-vpn/index.html
-  cp "$D/panel/api" /www-vpn/cgi-bin/api && chmod +x /www-vpn/cgi-bin/api
+  cp "$D/panel/manager.html" /www-vpn/manager.html
+  chmod 644 /www-vpn/index.html /www-vpn/manager.html
+  cp "$D/panel/api" /www-vpn/cgi-bin/api && chmod 755 /www-vpn/cgi-bin/api
   cp "$D/panel/vpn-panel.init" /etc/init.d/vpn-panel && chmod +x /etc/init.d/vpn-panel
   /etc/init.d/vpn-panel enable 2>/dev/null || true
   # `start` (not `restart`): uhttpd re-reads the CGI + index.html per request, so a
@@ -433,14 +436,17 @@ SDK4_FILES_OK=0
   [ -f "$D/sdk4-tab/reality.oui.lua" ] && [ -f "$D/sdk4-tab/reality.validator.lua" ] && SDK4_FILES_OK=1
 if [ -d /usr/lib/oui-httpd/rpc ] && [ -d /usr/share/oui/menu.d ] && [ -d /www/views ]; then
   if [ "$SDK4_FILES_OK" = 1 ]; then
-    say "GL SDK4 detected -> installing native VPN->Reality menu tab"
+    say "GL SDK4 detected -> installing native VPN->Sing-box VPN menu tab"
     mkdir -p /usr/share/gl-validator.d
+    cp "$D/panel/manager.html" /www/vpn-manager.html
+    chmod 644 /www/vpn-manager.html
     cp "$D/sdk4-tab/reality.menu.json"                  /usr/share/oui/menu.d/reality.json
     # Deploy the UNCOMPRESSED view (the SPA loads it via axios.get('/views/...js'))
     # and generate a .gz sibling for nginx `gzip_static`. If this router's nginx
     # lacks gzip_static, the plain .js is served anyway -> no /#/login bounce.
     cp "$D/sdk4-tab/gl-sdk4-ui-reality.common.js"       /www/views/gl-sdk4-ui-reality.common.js
     gzip -c "$D/sdk4-tab/gl-sdk4-ui-reality.common.js" > /www/views/gl-sdk4-ui-reality.common.js.gz 2>/dev/null
+    chmod 644 /www/views/gl-sdk4-ui-reality.common.js /www/views/gl-sdk4-ui-reality.common.js.gz
     # Only the lua rpc handler / validator need a FULL nginx restart (to drop OpenResty's
     # cached lua) — and that restart bounces the admin to /#/login. So detect whether they
     # ACTUALLY changed (vs the deployed copies) BEFORE overwriting; if only JS/scripts
@@ -451,6 +457,7 @@ if [ -d /usr/lib/oui-httpd/rpc ] && [ -d /usr/share/oui/menu.d ] && [ -d /www/vi
     cmp -s "$D/sdk4-tab/reality.validator.lua" /usr/share/gl-validator.d/reality.lua 2>/dev/null || LUA_CHANGED=1
     cp "$D/sdk4-tab/reality.oui.lua"                    /usr/lib/oui-httpd/rpc/reality
     cp "$D/sdk4-tab/reality.validator.lua"              /usr/share/gl-validator.d/reality.lua
+    chmod 644 /usr/share/oui/menu.d/reality.json /usr/lib/oui-httpd/rpc/reality /usr/share/gl-validator.d/reality.lua
     if [ "$LUA_CHANGED" = 1 ]; then
       # lua handler changed -> MUST drop OpenResty's cache with a full restart (this
       # bounces login); then immediately rebuild GL's session-ws bridge. Order matters.
@@ -468,7 +475,7 @@ if [ -d /usr/lib/oui-httpd/rpc ] && [ -d /usr/share/oui/menu.d ] && [ -d /www/vi
     # survive firmware upgrades
     for p in /usr/share/oui/menu.d/reality.json /www/views/gl-sdk4-ui-reality.common.js.gz \
              /www/views/gl-sdk4-ui-reality.common.js \
-             /usr/lib/oui-httpd/rpc/reality /usr/share/gl-validator.d/reality.lua; do
+             /usr/lib/oui-httpd/rpc/reality /usr/share/gl-validator.d/reality.lua /www/vpn-manager.html; do
       grep -qxF "$p" /etc/sysupgrade.conf 2>/dev/null || echo "$p" >> /etc/sysupgrade.conf 2>/dev/null || true
     done
     # self-diagnostic (prints to the install log so we can confirm the tab will load,
@@ -479,7 +486,7 @@ if [ -d /usr/lib/oui-httpd/rpc ] && [ -d /usr/share/oui/menu.d ] && [ -d /www/vi
     RPCJ=$(curl -s --max-time 5 -X POST http://127.0.0.1/rpc -H 'glinet: 1' -d '{"jsonrpc":"2.0","id":1,"method":"call","params":["","reality","get_status",{}]}' 2>/dev/null | head -c 50)
     GLS=$([ -x /etc/init.d/gl-ngx-session ] && echo present || echo ABSENT)
     say "diag: view.js=$VJS gz_code=$VGZ gl-ngx-session=$GLS rpc=${RPCJ:-EMPTY}"
-    say "native Reality tab deployed: open the router UI -> VPN -> Reality"
+    say "native Sing-box VPN tab deployed: open the router UI -> VPN -> Sing-box VPN"
   else
     say "NOTE: SDK4 router detected but sdk4-tab/ files not bundled -> skipping native tab (the :8088 panel still works)."
   fi

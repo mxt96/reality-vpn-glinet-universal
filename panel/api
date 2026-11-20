@@ -1,21 +1,25 @@
 #!/bin/sh
 # VPN-Beryl local control panel API (session auth, password-only, brute-force).
 # Auth: validates against /etc/shadow root  == GL.iNet admin pass (rpcd $p$root). Unified.
+umask 077
 SESSDIR=/tmp/lk-sess; BFDIR=/tmp/lk-bf
 mkdir -p "$SESSDIR" "$BFDIR" 2>/dev/null
+chmod 700 "$SESSDIR" "$BFDIR"
 MAXFAIL=5; LOCKSEC=60; SESSTTL=86400
 API=http://127.0.0.1:9090; PU=/etc/sing-box/postup.sh
 
 emit(){ printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n'; [ -n "$1" ] && printf 'Set-Cookie: sid=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400\r\n' "$1"; printf '\r\n'; }
 SID=$(printf '%s' "$HTTP_COOKIE" | sed -n 's/.*sid=\([A-Za-z0-9]\{8,\}\).*/\1/p')
 valid(){ [ -n "$SID" ] && [ -f "$SESSDIR/$SID" ] && [ "$(date +%s)" -lt "$(cat "$SESSDIR/$SID" 2>/dev/null || echo 0)" ]; }
-check_pw(){ S=$(grep '^root:' /etc/shadow | cut -d: -f2); A=$(printf '%s' "$S" | cut -d'$' -f2); SA=$(printf '%s' "$S" | cut -d'$' -f3); case "$A" in 1) F=-1;; 5) F=-5;; 6) F=-6;; apr1) F=-apr1;; *) F=-5;; esac; [ -n "$SA" ] && [ "$(openssl passwd $F -salt "$SA" "$1" 2>/dev/null)" = "$S" ]; }
+check_pw(){ S=$(grep '^root:' /etc/shadow | cut -d: -f2); A=$(printf '%s' "$S" | cut -d'$' -f2); SA=$(printf '%s' "$S" | cut -d'$' -f3); case "$A" in 1) F=-1;; 5) F=-5;; 6) F=-6;; apr1) F=-apr1;; *) F=-5;; esac; [ -n "$SA" ] && [ "$(printf '%s\n' "$1" | openssl passwd $F -salt "$SA" -stdin 2>/dev/null)" = "$S" ]; }
 now_of(){ curl -s --max-time 3 "$API/proxies/$1" 2>/dev/null | sed -n 's/.*"now": *"\([A-Za-z0-9._-]*\)".*/\1/p'; }
 # killswitch backend (fw4/nftables vs fw3/iptables) + desired-state live in ks-lib.sh
 . /etc/sing-box/ks-lib.sh 2>/dev/null
 ks_on(){ ks_set_desired 1 && ks_enforce; }
 ks_off(){ ks_set_desired 0 && ks_enforce; }
 
+case "${CONTENT_LENGTH:-0}" in ''|*[!0-9]*) emit; echo '{"ok":false,"msg":"Invalid length"}'; exit 0 ;; esac
+[ "${CONTENT_LENGTH:-0}" -le 1048576 ] || { emit; echo '{"ok":false,"msg":"Request too large"}'; exit 0; }
 ACT=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*action=\([a-z_]*\).*/\1/p')
 IP=$(printf '%s' "${REMOTE_ADDR:-x}" | tr -c 'A-Za-z0-9.' '_'); BF="$BFDIR/$IP"
 N=$(date +%s)
@@ -38,29 +42,30 @@ fi
 if ! valid; then emit; echo '{"auth":false}'; exit 0; fi
 
 case "$ACT" in
+  manager)
+    OP=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]op=\([a-z-]*\).*/\1/p')
+    case "$OP" in
+      status|devices|settings|policies|servers|backup|diagnostics|subscriptions) ;;
+      set-policy|delete-policy|set-settings|delete-server|delete-subscription|add-subscription|refresh-subscriptions|enabled|killswitch|select|import|favorite|apply-favorites)
+        [ "$REQUEST_METHOD" = POST ] || { emit; echo '{"ok":false,"msg":"POST required"}'; exit 0; } ;;
+      *) emit; echo '{"ok":false,"msg":"Unknown operation"}'; exit 0 ;;
+    esac
+    emit
+    head -c "${CONTENT_LENGTH:-0}" | lua /etc/sing-box/manager.lua "$OP"
+    exit 0 ;;
   logout) rm -f "$SESSDIR/$SID"; emit; echo '{"ok":true}'; exit 0;;
-  vpn_on) echo 1 > /etc/sing-box/vpn.enabled; /etc/init.d/sing-box start >/dev/null 2>&1; sleep 1; [ -f "$PU" ] && sh "$PU" >/dev/null 2>&1; ks_enforce 2>/dev/null; (/etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
+  vpn_on) sh /etc/sing-box/control.sh on >/dev/null 2>&1 || { emit; echo '{"ok":false,"msg":"VPN did not become ready"}'; exit 0; };;
   speedtest)
     DB=$(curl -4 -s --max-time 12 -o /dev/null -w '%{speed_download}' 'https://speed.cloudflare.com/__down?bytes=30000000' 2>/dev/null)
     UB=$(head -c 8000000 /dev/zero 2>/dev/null | curl -4 -s --max-time 12 -o /dev/null -w '%{speed_upload}' --data-binary @- 'https://speed.cloudflare.com/__up' 2>/dev/null)
     DM=$(awk "BEGIN{printf \"%.1f\", ${DB:-0}*8/1000000}")
     UM=$(awk "BEGIN{printf \"%.1f\", ${UB:-0}*8/1000000}")
     emit; echo "{\"down\":\"$DM\",\"up\":\"$UM\"}"; exit 0;;
-  vpn_off) echo 0 > /etc/sing-box/vpn.enabled; /etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; ip rule del pref 500 >/dev/null 2>&1; ks_enforce 2>/dev/null; (sleep 3; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
+  vpn_off) sh /etc/sing-box/control.sh off >/dev/null 2>&1 || { emit; echo '{"ok":false}'; exit 0; };;
   ks_on) ks_on || { emit; echo '{"ok":false,"msg":"Could not enable leak protection"}'; exit 0; };;
   ks_off) ks_off || { emit; echo '{"ok":false,"msg":"Could not disable leak protection"}'; exit 0; };;
   proto) P=$(printf '%s' "$QUERY_STRING" | sed -n 's/.*[?&]p=\([A-Za-z0-9._-]*\).*/\1/p')
-      # Selectable outbounds: "auto" (all servers), the protocol-filtered "auto-reality"
-      # / "auto-hy2" groups (rebuild.sh builds them only when servers of that family
-      # exist), or a real server tag. Anything else (legacy phantoms hy2-out/reality-out)
-      # has no matching outbound -> coerce to "auto" so a bad pick can never blackhole
-      # traffic / kill the LAN with killswitch on.
-      case "$P" in
-        auto) ;;
-        auto-reality|auto-hy2) grep -q "\"tag\": \"$P\"" /etc/sing-box/reality_full.json 2>/dev/null || P=auto ;;
-        *) { [ -n "$P" ] && [ -f "/etc/sing-box/servers/$P.json" ]; } || P=auto ;;
-      esac
-      curl -s --max-time 4 -X PUT "$API/proxies/select" -d "{\"name\":\"$P\"}" >/dev/null 2>&1; (sleep 2; /etc/sing-box/geo-refresh.sh &) 2>/dev/null;;
+    sh /etc/sing-box/select-server.sh "$P" >/dev/null 2>&1 || { emit; echo '{"ok":false,"msg":"Could not select server"}'; exit 0; };;
   setpass) NP=$(head -c "${CONTENT_LENGTH:-0}" 2>/dev/null)
     if [ -n "$NP" ] && [ "${#NP}" -ge 6 ]; then
       if printf 'root:%s\n' "$NP" | chpasswd >/dev/null 2>&1; then emit; echo '{"ok":true,"msg":"Password changed"}'; else emit; echo '{"ok":false,"msg":"Password change failed"}'; fi
@@ -148,4 +153,5 @@ VER=$(cat /etc/sing-box/version 2>/dev/null | tr -d ' \r\n'); [ -n "$VER" ] || V
 # "updated_to" set right after an install (Update button) and expires in 10 min,
 # so the panel can show a one-shot "✅ updated to vX" confirmation.
 UPDTO=""; [ -n "$(find /etc/sing-box/.updated_to -mmin -10 2>/dev/null)" ] && UPDTO=$(cat /etc/sing-box/.updated_to 2>/dev/null | tr -d ' \r\n')
-emit; echo "{\"auth\":true,\"vpn\":$VPN,\"killswitch\":$KS,\"mode\":\"$MODE\",\"active\":\"$ACTIVE\",\"server\":\"$SRV\",\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\",\"version\":\"$VER\",\"updated_to\":\"$UPDTO\"}"
+OBSERVED=$(lua /etc/sing-box/manager.lua status </dev/null 2>/dev/null | sed -n 's/.*"state":"\([a-z-]*\)".*/\1/p')
+emit; echo "{\"state\":\"$OBSERVED\",\"auth\":true,\"vpn\":$VPN,\"killswitch\":$KS,\"mode\":\"$MODE\",\"active\":\"$ACTIVE\",\"server\":\"$SRV\",\"egress\":\"$EG\",\"country\":\"$CO\",\"city\":\"$CI\",\"ping\":\"$PG\",\"version\":\"$VER\",\"updated_to\":\"$UPDTO\"}"

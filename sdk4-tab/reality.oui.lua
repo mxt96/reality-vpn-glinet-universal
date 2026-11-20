@@ -17,16 +17,12 @@ end
 
 -- Non-blocking shell exec via OpenResty pipe (cooperative, yields to event loop).
 local function sh(cmd, timeout)
-    local argv
-    if timeout then
-        argv = { "timeout", tostring(timeout), "sh", "-c", cmd }
-    else
-        argv = { "sh", "-c", cmd }
-    end
+    local argv = { "sh", "-c", cmd }
     local p = ngx.pipe.spawn(argv)
     if not p then return "" end
     if timeout then pcall(function() p:set_timeouts(nil, (tonumber(timeout) + 2) * 1000, nil) end) end
     local data = p:stdout_read_all()
+    if p.wait then p:wait() end
     return data or ""
 end
 
@@ -95,8 +91,10 @@ function M.get_status(args)
         srvjson = trim(sh("cat " .. SERVERS .. "/" .. active .. ".json 2>/dev/null"))
     end
     local pending = trim(sh("[ -f /etc/sing-box/favorites.pending ] && echo y")) == "y"
+    local observed = sh("lua /etc/sing-box/manager.lua status </dev/null 2>/dev/null")
+    local ok_observed, live = pcall(cjson.decode, observed)
     local ok, res = pcall(parse_status, vpn, ks, sel, active, geo, srvjson)
-    if ok and type(res) == "table" then res.favorites_pending = pending; res.killswitch_active = ks_active; return res end
+    if ok and type(res) == "table" then res.favorites_pending = pending; res.killswitch_active = ks_active; if ok_observed and type(live)=="table" then res.state=live.state; res.observed_running=live.running; res.warning=live.warning end; return res end
     return {
         running = (vpn == "true"), killswitch = (ks == "true"), mode = "", active = "",
         egress = "", country = "", city = "", ping = "",
@@ -132,14 +130,13 @@ function M.set_proto(args)
         end
     end
     if p == "auto" or p == "auto-reality" or p == "auto-hy2" or p == "auto-fav" then
-        if trim(sh("grep -q '\"tag\": \"" .. p .. "\"' /etc/sing-box/reality_full.json 2>/dev/null && echo y")) ~= "y" then
+        if trim(sh("grep -q '\"tag\"[[:space:]]*:[[:space:]]*\"" .. p .. "\"' /etc/sing-box/reality_full.json 2>/dev/null && echo y")) ~= "y" then
             return { ok = false, msg = "This server pool is unavailable" }
         end
     elseif trim(sh("[ -f /etc/sing-box/servers/" .. p .. ".json ] && echo y")) ~= "y" then
         return { ok = false, msg = "Server no longer exists" }
     end
-    local result = trim(sh("curl -fsS --max-time 4 -X PUT " .. CLASH .. "/proxies/select -d '{\"name\":\"" .. p ..
-        "\"}' >/dev/null 2>&1 && echo OK"))
+    local result = trim(sh("sh /etc/sing-box/select-server.sh '" .. p .. "' 2>/dev/null"))
     if result ~= "OK" then return { ok = false, msg = "Could not switch server" } end
     sh("(sleep 2; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1")
     return { ok = true, mode = p }
@@ -148,22 +145,9 @@ end
 -- ---- on / off -----------------------------------------------------------
 function M.set_enabled(args)
     local on = args and args.on
-    if on == true or on == "true" or on == 1 then
-        -- persist desired=ON so the supervisor keeps the tunnel up / auto-reconnects
-        sh("echo 1 > /etc/sing-box/vpn.enabled; " ..
-           "/etc/init.d/sing-box start >/dev/null 2>&1; sleep 1; " ..
-           "[ -f /etc/sing-box/postup.sh ] && sh /etc/sing-box/postup.sh >/dev/null 2>&1; " ..
-           ". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_enforce; " ..
-           "(/etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1", 20)
-    else
-        -- persist desired=OFF; ks_enforce releases the killswitch block (can't strand)
-        sh("echo 0 > /etc/sing-box/vpn.enabled; " ..
-           "/etc/init.d/sing-box stop >/dev/null 2>&1; killall sing-box >/dev/null 2>&1; " ..
-           "ip rule del pref 500 >/dev/null 2>&1; " ..
-           ". /etc/sing-box/ks-lib.sh 2>/dev/null; ks_enforce; " ..
-           "(sleep 3; /etc/sing-box/geo-refresh.sh &) >/dev/null 2>&1", 15)
-    end
-    return { ok = true }
+    local enabled = on == true or on == "true" or on == 1
+    local result = trim(sh("sh /etc/sing-box/control.sh " .. (enabled and "on" or "off") .. " 2>/dev/null", 25))
+    return {ok = result == "OK", msg = result == "OK" and "" or "VPN did not become ready; check diagnostics"}
 end
 
 -- ---- killswitch ---------------------------------------------------------
@@ -438,5 +422,20 @@ end
 
 -- WAN MAC privacy removed 2026-06-20: GL.iNet's newer firmware ships a native
 -- "random MAC" setting, so the panel's own MAC tool was redundant.
+
+local manager_ops = {}
+for _,op in ipairs({"status","devices","settings","policies","servers","backup","diagnostics","set-policy","delete-policy","set-settings","subscriptions","add-subscription","delete-server","delete-subscription","refresh-subscriptions","enabled","killswitch","select","import","favorite","apply-favorites"}) do manager_ops[op]=true end
+function M.manager(args)
+    if type(args)~="table" or not manager_ops[args.op] then return {ok=false,msg="Unknown operation"} end
+    local path=trim(sh("umask 077; mktemp /tmp/vpn-manager.XXXXXX"))
+    if not path:match("^/tmp/vpn%-manager%.[%w]+$") then return {ok=false,msg="Cannot create request"} end
+    local f=io.open(path,"w")
+    if not f then return {ok=false,msg="Cannot write request"} end
+    f:write(cjson.encode(args.data or {})); f:close()
+    local out=sh("lua /etc/sing-box/manager.lua '"..args.op.."' < '"..path.."' 2>/dev/null",150)
+    os.remove(path)
+    local ok,result=pcall(cjson.decode,out)
+    return ok and result or {ok=false,msg="Manager operation failed"}
+end
 
 return M

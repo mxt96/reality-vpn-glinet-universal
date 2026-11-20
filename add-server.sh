@@ -1,4 +1,5 @@
 #!/bin/sh
+umask 077
 # add-server.sh '<share-link>' [tag]
 # Parse a vless://...security=reality... or hysteria2://... share-link into a sing-box
 # outbound and save it as servers/<tag>.json, then rebuild the config.

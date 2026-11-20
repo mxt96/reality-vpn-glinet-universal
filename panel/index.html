@@ -1054,7 +1054,7 @@
   .modal-textarea::placeholder { color: var(--txt3); }
 </style>
 </head>
-<body>
+<body><p style="padding:12px;text-align:center;background:#e7f0ff"><a href="/manager.html">VPN manager: devices, routing, DNS and diagnostics / Управление VPN и устройствами</a></p>
 
 <!-- ── Full-screen Loader ───────────────────────────── -->
 <div class="full-loader" id="loader">
@@ -1648,7 +1648,7 @@
     // alive. With no server the config routes DIRECT, so the green/ON state must
     // require an active non-direct outbound — otherwise the hero falsely reads
     // "protected" whenever the process is up (e.g. autostarted after a reboot).
-    const tunneled = !!s.vpn && !!s.active && s.active !== 'direct';
+    const tunneled = !!s.vpn && s.state === 'connected';
 
     // VPN toggle reflects the sing-box process (start/stop control)
     if (vpnToggle.classList.contains('on') !== vpnOn) {
@@ -1660,7 +1660,7 @@
       tunneled ? heroCard.classList.add('vpn-on') : heroCard.classList.remove('vpn-on');
     }
     // Hero text: ON only when tunneled; running-without-server shows DIRECT
-    const wantText = tunneled ? 'ON' : (vpnOn ? 'DIRECT' : 'OFF');
+    const wantText = tunneled ? 'ON' : (vpnOn ? (s.state === 'error' ? 'ERROR' : 'CONNECTING') : 'OFF');
     if (heroText.textContent !== wantText) heroText.textContent = wantText;
     heroText.style.color = tunneled ? 'var(--green)' : 'var(--txt2)';
 
@@ -1739,6 +1739,7 @@
         applyState({
           auth:       data.auth,
           vpn:        data.vpn,
+          state:      data.state,
           killswitch: data.killswitch,
           mode:       data.mode,
           active:     data.active,

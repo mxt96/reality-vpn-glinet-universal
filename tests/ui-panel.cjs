@@ -5,7 +5,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const vue = fs.readFileSync(require.resolve(process.env.VUE_MODULE || 'vue/dist/vue.js'), 'utf8');
 const panel = fs.readFileSync(path.join(__dirname, '../sdk4-tab/gl-sdk4-ui-reality.common.js'), 'utf8');
 (async () => {
-  const browser = await chromium.launch({args: ['--no-sandbox']});
+  const browser = await chromium.launch({executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--no-sandbox']});
   try {
     const page = await browser.newPage({viewport: {width: 1280, height: 1100}});
     const errors = [];

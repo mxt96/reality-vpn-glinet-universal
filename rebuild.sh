@@ -14,7 +14,21 @@ SRVDIR="$SBDIR/servers"
 CFG="$SBDIR/reality_full.json"
 SB="$SBDIR/sing-box"
 [ -x "$SB" ] || SB=$(command -v sing-box || echo "$SB")
+umask 077
 mkdir -p "$SRVDIR"
+if [ -r "$SBDIR/runtime-lib.sh" ]; then . "$SBDIR/runtime-lib.sh"; else . "$(dirname "$0")/runtime-lib.sh"; fi
+LOCK="$SBDIR/.rebuild.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  owner=$(cat "$LOCK/pid" 2>/dev/null)
+  case "$owner" in ''|*[!0-9]*) echo CHECK_FAIL; echo 'Configuration update is busy'; exit 1 ;; esac
+  if kill -0 "$owner" 2>/dev/null; then echo CHECK_FAIL; echo 'Configuration update is busy'; exit 1; fi
+  rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null
+  mkdir "$LOCK" 2>/dev/null || { echo CHECK_FAIL; exit 1; }
+fi
+CANDIDATE=$(mktemp "$SBDIR/.config.XXXXXX") || { rm -f "$LOCK/pid"; rmdir "$LOCK"; exit 1; }
+echo $$ > "$LOCK/pid"
+trap 'rm -f "$CANDIDATE" "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null' EXIT
+trap 'exit 1' HUP INT TERM
 SRV_OUT=""; SRV_TAGS=""; REA_TAGS=""; HY2_TAGS=""; N=0
 for f in "$SRVDIR"/*.json; do
   [ -f "$f" ] || continue
@@ -30,7 +44,11 @@ $(cat "$f")"
   esac
   N=$((N+1))
 done
-cp -f "$CFG" "$CFG.bak" 2>/dev/null
+SELECTED=$(cat "$SBDIR/selected" 2>/dev/null)
+case "$SELECTED" in ''|*[!A-Za-z0-9._-]*|.*) SELECTED=auto ;; esac
+case ",$SRV_TAGS," in *\"$SELECTED\"*) : ;; *)
+  case "$SELECTED" in auto|auto-reality|auto-hy2|auto-fav) : ;; *) SELECTED=auto ;; esac
+esac
 if [ "$N" -eq 0 ]; then
   # no servers yet -> valid direct-only config so the router keeps internet
   OUTBOUNDS='{ "type": "direct", "tag": "direct" }'
@@ -65,18 +83,29 @@ else
   fi
   OUTBOUNDS="${SRV_OUT#,},
     { \"type\": \"urltest\", \"tag\": \"auto\", \"outbounds\": [${SRV_TAGS_CLEAN}], \"url\": \"https://www.gstatic.com/generate_204\", \"interval\": \"30s\", \"tolerance\": 80, \"interrupt_exist_connections\": true }${FILT_OUT},
-    { \"type\": \"selector\", \"tag\": \"select\", \"outbounds\": [\"auto\"${SEL_EXTRA}${SRV_TAGS}], \"default\": \"auto\" },
+    { \"type\": \"selector\", \"tag\": \"select\", \"outbounds\": [\"auto\"${SEL_EXTRA}${SRV_TAGS}], \"default\": \"$SELECTED\" },
     { \"type\": \"direct\", \"tag\": \"direct\" }"
   FINAL="select"
 fi
-cat > "$CFG" <<JSON
+# A removed pool cannot be used as the selector default.
+case "$SELECTED" in
+ auto-reality) [ -n "$REA_TAGS" ] || SELECTED=auto ;;
+ auto-hy2) [ -n "$HY2_TAGS" ] || SELECTED=auto ;;
+ auto-fav)
+  if [ "$N" -gt 0 ] && [ -z "$FAV_TAGS" ]; then
+    echo CHECK_FAIL; echo 'Choose a favorite or explicitly select a different pool'; exit 1
+  fi ;;
+esac
+OUTBOUNDS=$(printf '%s' "$OUTBOUNDS" | sed 's/"default": "[^"]*"/"default": "'"$SELECTED"'"/')
+DETOUR=""; [ "$FINAL" = direct ] || DETOUR=", \"detour\": \"$FINAL\""
+cat > "$CANDIDATE" <<JSON
 {
   "log": { "level": "warn", "timestamp": true },
-  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" } },
+  "experimental": { "clash_api": { "external_controller": "127.0.0.1:9090" }, "cache_file": { "enabled": true, "path": "$SBDIR/cache.db" } },
   "dns": {
     "servers": [
-      { "tag": "remote", "type": "udp", "server": "8.8.8.8", "detour": "$FINAL" },
-      { "tag": "direct-dns", "type": "udp", "server": "1.1.1.1", "detour": "direct" }
+      { "tag": "remote", "type": "udp", "server": "8.8.8.8"$DETOUR },
+      { "tag": "direct-dns", "type": "udp", "server": "1.1.1.1" }
     ],
     "final": "remote",
     "strategy": "prefer_ipv4"
@@ -100,60 +129,36 @@ cat > "$CFG" <<JSON
   }
 }
 JSON
-if [ "${REBUILD_CHECK_ONLY:-0}" = 1 ] || [ "$(cat "$SBDIR/vpn.enabled" 2>/dev/null)" = 0 ]; then
-  if "$SB" check -c "$CFG"; then
-    echo OK
-    exit 0
+if [ -f "$SBDIR/manager.lua" ]; then
+  if ! lua "$SBDIR/manager.lua" render "$CANDIDATE" >/dev/null 2>"$SBDIR/check.err"; then
+    echo CHECK_FAIL; echo 'Manager configuration rejected'; exit 1
   fi
-  [ "${REBUILD_CHECK_ONLY:-0}" = 1 ] || cp -f "$CFG.bak" "$CFG" 2>/dev/null
-  echo CHECK_FAIL
-  exit 1
 fi
-# Ensure swap is on before any heavy sing-box exec (RAM-starved routers). install.sh
-# creates the swapfile on persistent storage; re-enable it here in case of a reboot
-# where rc.local hasn't run yet. SILENT no-op on roomy-RAM boxes / no swapfile (stdout
-# MUST stay clean — the panel reads our first stdout line as the OK/FAIL verdict).
-for _sw in /mnt/*/reality-swap /tmp/mountd/*/reality-swap /overlay/reality-swap; do
-  [ -f "$_sw" ] && ! grep -qF "$_sw" /proc/swaps 2>/dev/null && swapon "$_sw" >/dev/null 2>&1
-done
-
-# Validation is CHECK-FIRST so the healthy-router path stays FAST. The panel reads
-# rebuild.sh's first stdout line over an RPC with a read timeout; v1.2.7 polled the
-# service for up to 12s before printing OK, so on a perfectly fine router (Beryl) the
-# RPC timed out and the panel showed "Server config rejected". Fix: if `sing-box check`
-# passes (1-2s on any box with enough RAM) -> apply + OK immediately (identical to the
-# proven v1.2.6 path). ONLY if check FAILS do we fall back to a RUNTIME probe — on a
-# RAM-starved router (E750 128MB) `check` execs the ~58MB binary and gets OOM-killed even
-# for a valid config (exit status lies). There we (re)start and trust the Clash API
-# (127.0.0.1:9090) coming up (swap from install.sh gives the headroom). Genuinely bad
-# config = check fails AND service won't surface -> roll back + CHECK_FAIL.
-svc_up() {
-  curl -s --max-time 2 -o /dev/null "http://127.0.0.1:9090/version" 2>/dev/null && return 0
-  command -v pidof >/dev/null 2>&1 && pidof sing-box >/dev/null 2>&1 && return 0
-  return 1
-}
-if "$SB" check -c "$CFG" 2>/tmp/sb-check.err; then
-  # valid config — fast path, byte-for-byte the proven v1.2.6 OK branch (healthy routers).
-  [ -x /etc/init.d/sing-box ] && /etc/init.d/sing-box restart >/dev/null 2>&1
-  sleep 6
-  sh "$SBDIR/postup.sh" >/dev/null 2>&1
+# Build/validate a candidate before replacing the live file. A successful check
+# is necessary, but daemon readiness is also checked after applying.
+if ! "$SB" check -c "$CANDIDATE" 2>"$SBDIR/check.err"; then
+  echo CHECK_FAIL; head -5 "$SBDIR/check.err"; exit 1
+fi
+if [ "${REBUILD_CHECK_ONLY:-0}" = 1 ]; then
+  mv "$CANDIDATE" "$CFG"
+  echo OK; exit 0
+fi
+[ ! -f "$CFG" ] || cp -p "$CFG" "$CFG.bak" || exit 1
+mv "$CANDIDATE" "$CFG" || exit 1
+if [ "$(cat "$SBDIR/vpn.enabled" 2>/dev/null)" = 0 ] || [ "$N" = 0 ]; then
+  echo OK; exit 0
+fi
+if [ ! -x "$SB_SERVICE" ]; then
+  echo CHECK_FAIL; echo 'Service manager unavailable'; exit 1
+fi
+sb_state connecting
+if "$SB_SERVICE" restart >/dev/null 2>&1 && sb_wait_ready && sb_apply_routes; then
+  sb_state connecting
   echo OK
-elif [ -x /etc/init.d/sing-box ]; then
-  # check FAILED — could be OOM on a starved router (valid config) or a real bad config.
-  # Decide by whether the service actually comes up with this config (Clash API answers).
-  /etc/init.d/sing-box restart >/dev/null 2>&1
-  up=0; i=0
-  while [ "$i" -lt 7 ]; do svc_up && { up=1; break; }; sleep 1; i=$((i+1)); done
-  if [ "$up" = 1 ]; then
-    sh "$SBDIR/postup.sh" >/dev/null 2>&1
-    echo OK
-  else
-    cp -f "$CFG.bak" "$CFG" 2>/dev/null
-    /etc/init.d/sing-box restart >/dev/null 2>&1
-    echo "CHECK_FAIL"; head -5 /tmp/sb-check.err 2>/dev/null
-  fi
 else
-  # no service manager (test harness / pre-install) and check failed -> reject.
-  cp -f "$CFG.bak" "$CFG" 2>/dev/null
-  echo "CHECK_FAIL"; head -5 /tmp/sb-check.err 2>/dev/null
+  [ ! -f "$CFG.bak" ] || cp -p "$CFG.bak" "$CFG"
+  "$SB_SERVICE" restart >/dev/null 2>&1
+  sb_state error
+  echo CHECK_FAIL; echo 'Daemon did not become ready; previous configuration restored'
+  exit 1
 fi
