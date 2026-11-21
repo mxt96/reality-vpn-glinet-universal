@@ -1853,7 +1853,10 @@
           if (updateRow) updateRow.style.display = 'none';
         }
       } else {
-        checkupdateDetail.textContent = 'Could not check — no internet?';
+        if (verLatest) verLatest.textContent = 'Latest unavailable';
+        checkupdateDetail.textContent = r && r.msg || 'Could not check the latest version. Retry or install from the repository.';
+        if (updateRow) updateRow.style.display = '';
+        updateDetail.textContent = 'Install latest from the repository';
       }
     }).catch(() => { checkupdateDetail.textContent = 'Check failed'; });
   }

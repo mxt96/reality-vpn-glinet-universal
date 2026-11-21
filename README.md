@@ -9,6 +9,11 @@ server** by pasting a share-link.
 With **zero servers configured the config is valid and routes DIRECT**, so the
 router keeps normal internet until you add a server.
 
+## Update-check hotfix
+
+If **Latest** shows **unknown**, see [one-time SSH recovery](docs/UPDATES.md).
+Version 2.0.0-beta.2 adds independent version sources and visible error handling.
+
 ## 2.0 beta upgrade
 
 The shared manager adds device/network access rules, explicit WireGuard/OpenVPN

@@ -14,7 +14,7 @@ jobs:
         run: |
           ln -sf /usr/bin/lua5.1 /usr/bin/lua
           for f in *.sh panel/api panel/vpn-panel.init; do sh -n "$f"; done
-          luac5.1 -p manager.lua sdk4-tab/reality.oui.lua sdk4-tab/reality.validator.lua
+          luac5.1 -p manager.lua check-update.lua sdk4-tab/reality.oui.lua sdk4-tab/reality.validator.lua
       - name: Run isolated backend tests
         run: |
           python3 tests/parser_regressions.py
@@ -22,6 +22,7 @@ jobs:
           python3 tests/backend_regressions.py
           python3 tests/routing_test.py
           python3 tests/manager_regressions.py
+          python3 tests/update_regressions.py
   browser:
     runs-on: ubuntu-24.04
     steps:

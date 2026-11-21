@@ -2,6 +2,7 @@
 
 | Problem | Fix and verification |
 | --- | --- |
+| Update check silently returned `Latest: unknown` | Single-command RPC capture, Lua version parsing, IPv4 raw/API/SOCKS fallbacks and explicit UI errors; see [UPDATES.md](UPDATES.md) |
 | `direct-dns` used `detour: direct`; sing-box 1.14 passed `check` but exited at startup | Remove the empty direct detour; boot real sing-box in QEMU |
 | Rebuild reported success after a dead daemon | Check API + TUN after restart; restore previous config and return failure on timeout |
 | Manual server selection reset after restart | Save selection, build a matching selector default and persist core cache; rebuild/reboot checks |

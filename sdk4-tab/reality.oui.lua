@@ -384,12 +384,11 @@ end
 local REPO = "mxt96/reality-vpn-glinet-universal"
 
 function M.check_update(args)
-    local inst = trim(sh("cat /etc/sing-box/version 2>/dev/null | tr -d ' \\r\\n'"))
-    if inst == "" then inst = "unknown" end
-    local lat = trim(sh("curl -fsSL --max-time 8 https://raw.githubusercontent.com/" ..
-        REPO .. "/main/VERSION 2>/dev/null | tr -d ' \\r\\n'", 10))
-    if lat == "" then lat = "unknown" end
-    return { installed = inst, latest = lat, update = (lat ~= "unknown" and inst ~= lat) }
+    local raw = sh("lua /etc/sing-box/check-update.lua", 20)
+    local ok, result = pcall(cjson.decode, raw)
+    if ok and type(result)=="table" then return result end
+    return {installed="unknown",latest="unknown",update=false,ok=false,
+        error="update_check_failed",msg="Update check failed. Retry or use Install latest."}
 end
 
 function M.do_update(args)

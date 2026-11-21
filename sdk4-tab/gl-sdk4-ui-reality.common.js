@@ -457,12 +457,26 @@
         var self = this; this.checking = true; this.updateMsg = "";
         return call("check_update").then(function (r) {
           self.checking = false; self.verLoaded = true; self.ver = r || {};
-        }).catch(function () { self.checking = false; self.verLoaded = true; });
+          if (!r || !r.latest || r.latest === "unknown") {
+            self.ver.error = self.ver.error || "version_fetch_failed";
+            self.ver.update = false;
+            self.updateMsg = r && r.msg || "Could not fetch the latest version. Retry or use Install latest.";
+          }
+        }).catch(function () {
+          self.checking = false; self.verLoaded = true;
+          self.ver = {installed: self.ver.installed, latest: "unknown", update: false, error: "rpc_failed"};
+          self.updateMsg = "Update check failed. Retry or use Install latest.";
+        });
       },
       doUpdate: function () {
         var self = this; this.updating = true; this.updateMsg = "Update scheduled — installing, the page will reload…";
         call("do_update").then(function (r) {
-          if (r && r.msg) self.updateMsg = r.msg + " — the page will reload.";
+          if (!r || r.ok === false) {
+            self.updating = false;
+            self.updateMsg = r && r.msg || "Couldn't start the update";
+            return;
+          }
+          if (r.msg) self.updateMsg = r.msg + " — the page will reload.";
           // the installer restarts services and this very tab; reload after ~85s to
           // pick up the new version + confirmation.
           setTimeout(function () { try { location.reload(); } catch (e) {} }, 85000);
@@ -748,12 +762,12 @@
       var versionCard = card([
         sectionTitle("Software updates"),
         kv("Installed", t.ver.installed || (t.verLoaded ? "unknown" : "…")),
-        kv("Latest", t.ver.latest || (t.verLoaded ? "unknown" : "…")),
+        kv("Latest", t.ver.latest && t.ver.latest !== "unknown" ? t.ver.latest : (t.verLoaded ? "Unavailable" : "…")),
         h("div", { style: { marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" } }, [
           h("gl-button", { attrs: { loading: t.checking }, on: { click: function () { t.checkUpdate(); } } }, [t._v("Check for updates")]),
-          t.ver.update ? h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.updating }, on: { click: function () { t.doUpdate(); } } }, [t._v("Update")]) : null,
+          (t.ver.update || t.ver.error) ? h("gl-button", { staticClass: "btn-item", attrs: { type: "primary", loading: t.updating }, on: { click: function () { t.doUpdate(); } } }, [t._v(t.ver.error ? "Install latest" : "Update")]) : null,
           (t.verLoaded && !t.ver.update && t.ver.latest && t.ver.latest !== "unknown") ? h("span", { style: { color: C.gr, fontSize: "13px" } }, [t._v("Up to date")]) : null,
-          t.updateMsg ? h("span", { style: { color: C.se, fontSize: "13px" } }, [t._v(t.updateMsg)]) : null
+          t.updateMsg ? h("span", { attrs: { role: t.ver.error ? "alert" : "status" }, style: { color: t.ver.error ? C.red : C.se, fontSize: "13px" } }, [t._v(t.updateMsg)]) : null
         ])
       ]);
 

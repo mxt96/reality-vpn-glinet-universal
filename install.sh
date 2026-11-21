@@ -262,7 +262,7 @@ set -e   # restore strict mode after best-effort swap provisioning
 # ---- 5) scripts ------------------------------------------------------------
 for s in parse-link.sh rebuild.sh geo-refresh.sh postup.sh watchdog.sh ks-sync.sh ks-lib.sh \
          add-server.sh list-servers.sh del-server.sh import-links.sh sub-store.sh \
-         runtime-lib.sh select-server.sh monitor.sh control.sh subscriptions-refresh.sh manager.lua; do
+         runtime-lib.sh select-server.sh monitor.sh control.sh subscriptions-refresh.sh manager.lua check-update.lua; do
   cp "$D/$s" "$SBDIR/$s" && chmod +x "$SBDIR/$s"
 done
 # MAC privacy removed from the panel — GL.iNet's newer firmware has a native
