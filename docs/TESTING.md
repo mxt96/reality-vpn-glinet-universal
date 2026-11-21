@@ -10,9 +10,10 @@ python3 tests/cli_regressions.py
 python3 tests/backend_regressions.py
 python3 tests/routing_test.py
 python3 tests/manager_regressions.py
+python3 tests/update_regressions.py
 ```
 
-There are 55 backend tests, including parser encoding, subscription rollback,
+There are 66 backend tests, including parser encoding, subscription rollback,
 real staged-rebuild helper availability, device precedence, direct/native tunnel
 fail-closed behavior, private backup versus diagnostic output, daemon failure
 rollback and HTTPS monitoring without ICMP. Adapters isolate host routing changes;
@@ -95,3 +96,10 @@ For a target device, record its model, GL firmware build, `/etc/openwrt_release`
 `ubus call system board`, firewall backend and acceleration state. Capture packets
 on all WAN/VPN interfaces during reboot, firewall reload and tunnel failure.
 Success after a reload does not prove that no individual packet escaped during it.
+
+## Update-check hotfix (2.0.0-beta.2)
+
+The additional 11 updater tests and native browser assertions cover the
+`Latest: unknown` report. Live HTTPS requests verified raw and API response
+formats. Forwarding and physical-hardware results above refer to beta.1; this
+hotfix changes update checking and UI error handling, not packet routing.
