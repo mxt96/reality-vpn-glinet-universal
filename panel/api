@@ -112,10 +112,7 @@ case "$ACT" in
       [ -n "$DP" ] && [ -f "/etc/sing-box/servers/$DP.json" ] && { rm -f "/etc/sing-box/servers/$DP.json"; /etc/sing-box/rebuild.sh >/dev/null 2>&1; }
       emit; echo '{"ok":true}'; exit 0;;
   checkupdate)
-      INST=$(cat /etc/sing-box/version 2>/dev/null | tr -d ' \r\n'); [ -n "$INST" ] || INST=unknown
-      LAT=$(curl -fsSL --max-time 8 https://raw.githubusercontent.com/mxt96/reality-vpn-glinet-universal/main/VERSION 2>/dev/null | tr -d ' \r\n'); [ -n "$LAT" ] || LAT=unknown
-      UPD=false; [ "$LAT" != unknown ] && [ "$INST" != "$LAT" ] && UPD=true
-      emit; echo "{\"installed\":\"$INST\",\"latest\":\"$LAT\",\"update\":$UPD}"; exit 0;;
+      emit; lua /etc/sing-box/check-update.lua; exit 0;;
   update)
       # The update re-runs the installer, which restarts services — so it must NOT
       # run inside uhttpd's process tree (it would be killed, and routers here have

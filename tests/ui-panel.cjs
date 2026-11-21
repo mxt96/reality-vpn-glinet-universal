@@ -88,6 +88,18 @@ const panel = fs.readFileSync(path.join(__dirname, '../sdk4-tab/gl-sdk4-ui-reali
     await page.evaluate(() => {mock.get_status.killswitch_active = false; return vm.refresh();});
     assert.match(await page.locator('body').innerText(), /Internet blocking is not active/);
     assert.doesNotMatch(await page.locator('body').innerText(), /Direct internet blocked/);
+    await page.locator('summary').filter({hasText: /^Advanced$/}).click();
+    await page.evaluate(() => {mock.check_update = {installed: '1.6.0', latest: 'unknown', update: false, error: 'version_fetch_failed', msg: 'Check router DNS and GitHub access'};});
+    await page.getByRole('button', {name: 'Check for updates', exact: true}).click();
+    await page.getByText('Unavailable', {exact: true}).waitFor();
+    assert.match(await page.locator('body').innerText(), /Check router DNS and GitHub access/);
+    assert.doesNotMatch(await page.locator('body').innerText(), /Up to date/);
+    await page.evaluate(() => {mock.do_update = {ok: false, msg: 'Cannot schedule update'};});
+    await page.getByRole('button', {name: 'Install latest', exact: true}).click();
+    await page.waitForFunction(() => !vm.updating && vm.updateMsg === 'Cannot schedule update');
+    await page.evaluate(() => {mock.check_update = {installed: '1.6.0', latest: '2.0.0-beta.2', update: true};});
+    await page.getByRole('button', {name: 'Check for updates', exact: true}).click();
+    await page.getByRole('button', {name: 'Update', exact: true}).waitFor();
     assert.deepEqual(errors, []);
     console.log('PASS: English UI; responsive layout; honest status; non-disruptive favorites; explicit apply; list-only filters; new-country visibility; empty-pool rejection; delete cancellation; RPC errors.');
   } finally {
